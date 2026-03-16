@@ -276,9 +276,9 @@ if __name__ == '__main__':
     print('[INFO]dev_set size: ', len(dev_set))
     
     # train dataloader
-    train_dataloader = DataLoader(train_set, batch_size = batch_size, shuffle=True, num_workers=4)
+    train_dataloader = DataLoader(train_set, batch_size = batch_size, shuffle=True, num_workers=0)
     # dev dataloader
-    val_dataloader = DataLoader(dev_set, batch_size = 1, shuffle=False, num_workers=4)
+    val_dataloader = DataLoader(dev_set, batch_size = 1, shuffle=False, num_workers=0)
     # dataloaders
     dataloaders = {'train':train_dataloader, 'dev':val_dataloader}
 
