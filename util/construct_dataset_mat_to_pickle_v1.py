@@ -73,6 +73,16 @@ for mat_file in tqdm(mat_files):
             sent_obj = {'content':sent.content}
             sent_obj['sentence_level_EEG'] = {'mean_t1':sent.mean_t1, 'mean_t2':sent.mean_t2, 'mean_a1':sent.mean_a1, 'mean_a2':sent.mean_a2, 'mean_b1':sent.mean_b1, 'mean_b2':sent.mean_b2, 'mean_g1':sent.mean_g1, 'mean_g2':sent.mean_g2}
 
+            # ---- NEW: store sentence-level raw EEG signal ----
+            if hasattr(sent, 'rawData') and not isinstance(sent.rawData, float):
+                raw = np.array(sent.rawData, dtype=np.float32)
+                # v1 shape: (105, T)
+                if raw.ndim == 2 and raw.shape[0] == 105:
+                    sent_obj['rawData'] = raw
+                else:
+                    print(f'  unexpected rawData shape {raw.shape}, skipping rawData for this sentence')
+            # ---- END NEW ----
+
             if task_name == 'task1-SR':
                 sent_obj['answer_EEG'] = {'answer_mean_t1':sent.answer_mean_t1, 'answer_mean_t2':sent.answer_mean_t2, 'answer_mean_a1':sent.answer_mean_a1, 'answer_mean_a2':sent.answer_mean_a2, 'answer_mean_b1':sent.answer_mean_b1, 'answer_mean_b2':sent.answer_mean_b2, 'answer_mean_g1':sent.answer_mean_g1, 'answer_mean_g2':sent.answer_mean_g2}
             
@@ -141,4 +151,9 @@ if version == 'v1':
     print('num of sent:', len(whole_dataset['ZAB']))
     print()
 
-
+# NEW: verify rawData was saved
+first_subj = list(whole_dataset.keys())[0]
+for i, s in enumerate(whole_dataset[first_subj]):
+    if s is not None and 'rawData' in s:
+        print(f'rawData sanity check - subj:{first_subj} sent[{i}] rawData shape: {s["rawData"].shape}')
+        break

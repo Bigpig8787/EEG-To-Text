@@ -73,6 +73,26 @@ for file in tqdm(os.listdir(rootdir)):
                     'mean_g1':np.squeeze(f[mean_g1_objs[idx][0]][()]), 
                     'mean_g2':np.squeeze(f[mean_g2_objs[idx][0]][()])
                 }
+
+                # ---- NEW: store sentence-level raw EEG signal ----
+                try:
+                    raw_ref = rawData[idx][0]
+                    raw = np.array(f[raw_ref], dtype=np.float32)
+                    if raw.ndim == 2:
+                        # v2 shape is (T, 105), transpose to (105, T) for consistency
+                        if raw.shape[1] == 105:
+                            raw = raw.T
+                        # now raw is (105, T)
+                        if raw.shape[0] == 105:
+                            sent_obj['rawData'] = raw
+                        else:
+                            print(f'  unexpected rawData shape {raw.shape} after transpose, skipping')
+                    else:
+                        print(f'  rawData ndim={raw.ndim}, expected 2, skipping')
+                except Exception as e:
+                    print(f'  failed to read rawData for idx={idx}: {e}')
+                # ---- END NEW ----
+
                 # print(sent_obj)
                 sent_obj['word'] = []
 
@@ -137,3 +157,11 @@ with open(os.path.join(output_dir,output_name), 'wb') as handle:
 """sanity check"""
 print('subjects:', dataset_dict.keys())
 print('num of sent:', len(dataset_dict['YAC']))
+
+# NEW: verify rawData was saved
+for subj in dataset_dict:
+    for i, s in enumerate(dataset_dict[subj]):
+        if s is not None and 'rawData' in s:
+            print(f'rawData sanity check - subj:{subj} sent[{i}] rawData shape: {s["rawData"].shape}')
+            break
+    break

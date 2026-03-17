@@ -11,6 +11,8 @@ from tqdm import tqdm
 from fuzzy_match import match
 from fuzzy_match import algorithims
 
+from channel_mapping import BRAIN_REGION_INDICES
+
 # macro
 #ZUCO_SENTIMENT_LABELS = json.load(open('./dataset/ZuCo/task1-SR/sentiment_labels/sentiment_labels.json'))
 #SST_SENTIMENT_LABELS = json.load(open('./dataset/stanfordsentiment/ternary_dataset.json'))
@@ -22,7 +24,7 @@ def normalize_1d(input_tensor):
     input_tensor = (input_tensor - mean)/std
     return input_tensor 
 
-def get_input_sample(sent_obj, tokenizer, eeg_type = 'GD', bands = ['_t1','_t2','_a1','_a2','_b1','_b2','_g1','_g2'], max_len = 56, add_CLS_token = False):
+def get_input_sample(sent_obj, tokenizer, eeg_type = 'GD', bands = ['_t1','_t2','_a1','_a2','_b1','_b2','_g1','_g2'], max_len = 56, add_CLS_token = False, max_eeg_T = 2048):
     
     def get_word_embedding_eeg_tensor(word_obj, eeg_type, bands):
         frequency_features = []
@@ -135,16 +137,48 @@ def get_input_sample(sent_obj, tokenizer, eeg_type = 'GD', bands = ['_t1','_t2',
         print('discard length zero instance: ', target_string)
         return None
 
-    if 'raw_eeg_views' in sent_obj:
-        input_sample['raw_eeg_views'] = {
-            region: torch.FloatTensor(arr)
-            for region, arr in sent_obj['raw_eeg_views'].items()
-        }
+    # ---- NEW: process raw EEG for multi-view (sentence level) ----
+    if 'rawData' in sent_obj:
+        raw = sent_obj['rawData']  # (105, T)
+
+        # check for NaN
+        if np.isnan(raw).any():
+            # fall through without raw_eeg_views; word-level still usable
+            pass
+        else:
+            T = raw.shape[1]
+            # make T divisible by 4 (for EEGNet's two AvgPool2d(1,2))
+            max_T_aligned = (max_eeg_T // 4) * 4
+
+            # truncate or pad
+            if T > max_T_aligned:
+                raw = raw[:, :max_T_aligned]
+                actual_T = max_T_aligned
+            else:
+                actual_T = T
+                pad_len = max_T_aligned - T
+                if pad_len > 0:
+                    raw = np.pad(raw, ((0, 0), (0, pad_len)), mode='constant', constant_values=0.0)
+
+            # z-normalize per channel (across time)
+            mean = raw.mean(axis=1, keepdims=True)
+            std = raw.std(axis=1, keepdims=True)
+            std[std == 0] = 1.0  # avoid div by zero
+            raw = (raw - mean) / std
+
+            # split by brain region
+            raw_eeg_views = {}
+            for region, indices in BRAIN_REGION_INDICES.items():
+                raw_eeg_views[region] = torch.FloatTensor(raw[indices])  # (C_region, max_T_aligned)
+
+            input_sample['raw_eeg_views'] = raw_eeg_views
+            input_sample['raw_eeg_actual_T'] = actual_T  # for potential masking
+    # ---- END NEW ----
 
     return input_sample
 
 class ZuCo_dataset(Dataset):
-    def __init__(self, input_dataset_dicts, phase, tokenizer, subject = 'ALL', eeg_type = 'GD', bands = ['_t1','_t2','_a1','_a2','_b1','_b2','_g1','_g2'], setting = 'unique_sent', is_add_CLS_token = False):
+    def __init__(self, input_dataset_dicts, phase, tokenizer, subject = 'ALL', eeg_type = 'GD', bands = ['_t1','_t2','_a1','_a2','_b1','_b2','_g1','_g2'], setting = 'unique_sent', is_add_CLS_token = False, max_eeg_T = 2048):
         self.inputs = []
         self.tokenizer = tokenizer
 
@@ -172,21 +206,21 @@ class ZuCo_dataset(Dataset):
                     print('[INFO]initializing a train set...')
                     for key in subjects:
                         for i in range(train_divider):
-                            input_sample = get_input_sample(input_dataset_dict[key][i],self.tokenizer,eeg_type,bands = bands, add_CLS_token = is_add_CLS_token)
+                            input_sample = get_input_sample(input_dataset_dict[key][i],self.tokenizer,eeg_type,bands = bands, add_CLS_token = is_add_CLS_token, max_eeg_T = max_eeg_T)
                             if input_sample is not None:
                                 self.inputs.append(input_sample)
                 elif phase == 'dev':
                     print('[INFO]initializing a dev set...')
                     for key in subjects:
                         for i in range(train_divider,dev_divider):
-                            input_sample = get_input_sample(input_dataset_dict[key][i],self.tokenizer,eeg_type,bands = bands, add_CLS_token = is_add_CLS_token)
+                            input_sample = get_input_sample(input_dataset_dict[key][i],self.tokenizer,eeg_type,bands = bands, add_CLS_token = is_add_CLS_token, max_eeg_T = max_eeg_T)
                             if input_sample is not None:
                                 self.inputs.append(input_sample)
                 elif phase == 'test':
                     print('[INFO]initializing a test set...')
                     for key in subjects:
                         for i in range(dev_divider,total_num_sentence):
-                            input_sample = get_input_sample(input_dataset_dict[key][i],self.tokenizer,eeg_type,bands = bands, add_CLS_token = is_add_CLS_token)
+                            input_sample = get_input_sample(input_dataset_dict[key][i],self.tokenizer,eeg_type,bands = bands, add_CLS_token = is_add_CLS_token, max_eeg_T = max_eeg_T)
                             if input_sample is not None:
                                 self.inputs.append(input_sample)
             elif setting == 'unique_subj':
@@ -198,26 +232,29 @@ class ZuCo_dataset(Dataset):
                     print(f'[INFO]initializing a train set using {setting} setting...')
                     for i in range(total_num_sentence):
                         for key in ['ZAB', 'ZDM', 'ZGW', 'ZJM', 'ZJN', 'ZJS', 'ZKB', 'ZKH','ZKW']:
-                            input_sample = get_input_sample(input_dataset_dict[key][i],self.tokenizer,eeg_type,bands = bands, add_CLS_token = is_add_CLS_token)
+                            input_sample = get_input_sample(input_dataset_dict[key][i],self.tokenizer,eeg_type,bands = bands, add_CLS_token = is_add_CLS_token, max_eeg_T = max_eeg_T)
                             if input_sample is not None:
                                 self.inputs.append(input_sample)
                 if phase == 'dev':
                     print(f'[INFO]initializing a dev set using {setting} setting...')
                     for i in range(total_num_sentence):
                         for key in ['ZMG']:
-                            input_sample = get_input_sample(input_dataset_dict[key][i],self.tokenizer,eeg_type,bands = bands, add_CLS_token = is_add_CLS_token)
+                            input_sample = get_input_sample(input_dataset_dict[key][i],self.tokenizer,eeg_type,bands = bands, add_CLS_token = is_add_CLS_token, max_eeg_T = max_eeg_T)
                             if input_sample is not None:
                                 self.inputs.append(input_sample)
                 if phase == 'test':
                     print(f'[INFO]initializing a test set using {setting} setting...')
                     for i in range(total_num_sentence):
                         for key in ['ZPH']:
-                            input_sample = get_input_sample(input_dataset_dict[key][i],self.tokenizer,eeg_type,bands = bands, add_CLS_token = is_add_CLS_token)
+                            input_sample = get_input_sample(input_dataset_dict[key][i],self.tokenizer,eeg_type,bands = bands, add_CLS_token = is_add_CLS_token, max_eeg_T = max_eeg_T)
                             if input_sample is not None:
                                 self.inputs.append(input_sample)
             print('++ adding task to dataset, now we have:', len(self.inputs))
 
         print('[INFO]input tensor size:', self.inputs[0]['input_embeddings'].size())
+        # NEW: report raw EEG stats
+        raw_count = sum(1 for s in self.inputs if 'raw_eeg_views' in s)
+        print(f'[INFO]samples with raw_eeg_views: {raw_count}/{len(self.inputs)}')
         print()
 
     def __len__(self):
@@ -234,7 +271,7 @@ class ZuCo_dataset(Dataset):
             input_sample['target_mask'], 
             input_sample['sentiment_label'], 
             input_sample['sent_level_EEG'],
-            input_sample.get('raw_eeg_views', {})
+            input_sample.get('raw_eeg_views', {}),
         )
         # keys: input_embeddings, input_attn_mask, input_attn_mask_invert, target_ids, target_mask, 
 
