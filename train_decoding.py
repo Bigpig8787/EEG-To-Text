@@ -20,6 +20,9 @@ from data import ZuCo_dataset
 from model_decoding import BrainTranslator, BrainTranslatorNaive, MultiViewBrainTranslator
 from config import get_config
 
+# ---- 路徑設定 ----
+PROJECT_ROOT = os.path.abspath(os.path.dirname(__file__))
+
 
 def train_model(dataloaders, device, model, criterion, optimizer, scheduler, num_epochs=25,
                 checkpoint_path_best='./checkpoints/decoding/best/temp_decoding.pt',
@@ -47,8 +50,7 @@ def train_model(dataloaders, device, model, criterion, optimizer, scheduler, num
             # Iterate over data.
             for (input_embeddings, seq_len, input_masks, input_mask_invert,
                  target_ids, target_mask, sentiment_labels, sent_level_EEG, raw_eeg_views) in tqdm(dataloaders[phase]):
-                # print(input_embeddings, seq_len, input_masks, input_mask_invert,
-                #  target_ids, target_mask, sentiment_labels, sent_level_EEG)
+
                 # load in batch
                 input_embeddings_batch = input_embeddings.to(device).float()
                 input_masks_batch = input_masks.to(device)
@@ -70,39 +72,15 @@ def train_model(dataloaders, device, model, criterion, optimizer, scheduler, num
                                             input_mask_invert_batch, target_ids_batch)
 
                 """calculate loss"""
-                # logits = seq2seqLMoutput.logits # 8*48*50265
-                # logits = logits.permute(0,2,1) # 8*50265*48
-
-                # loss = criterion(logits, target_ids_batch_label) # calculate cross entropy loss only on encoded target parts
-                # NOTE: my criterion not used
                 loss = seq2seqLMoutput.loss  # use the BART language modeling loss
-
-                # """check prediction, instance 0 of each batch"""
-                # print('target size:', target_ids_batch.size(), ',original logits size:', logits.size(), ',target_mask size', target_mask_batch.size())
-                # logits = logits.permute(0,2,1)
-                # for idx in [0]:
-                #     print(f'-- instance {idx} --')
-                #     # print('permuted logits size:', logits.size())
-                #     probs = logits[idx].softmax(dim = 1)
-                #     # print('probs size:', probs.size())
-                #     values, predictions = probs.topk(1)
-                #     # print('predictions before squeeze:',predictions.size())
-                #     predictions = torch.squeeze(predictions)
-                #     # print('predictions:',predictions)
-                #     # print('target mask:', target_mask_batch[idx])
-                #     # print('[DEBUG]target tokens:',tokenizer.decode(target_ids_batch_copy[idx]))
-                #     print('[DEBUG]predicted tokens:',tokenizer.decode(predictions))
 
                 # backward + optimize only if in training phase
                 if phase == 'train':
-                    # with torch.autograd.detect_anomaly():
                     loss.backward()
                     optimizer.step()
 
                 # statistics
                 running_loss += loss.item() * input_embeddings_batch.size()[0]  # batch loss
-                # print('[DEBUG]loss:',loss.item())
-                # print('#################################')
 
             if phase == 'train':
                 scheduler.step()
@@ -140,7 +118,6 @@ def show_require_grad_layers(model):
             print(' ', name)
 
 if __name__ == '__main__':
-    home_directory = os.path.expanduser("~")
     args = get_config('train_decoding')
 
     ''' config param'''
@@ -154,13 +131,6 @@ if __name__ == '__main__':
     batch_size = args['batch_size']
     
     model_name = args['model_name']
-    # model_name = 'BrainTranslatorNaive' # with no additional transformers
-    # model_name = 'BrainTranslator' 
-    
-    # task_name = 'task1'
-    # task_name = 'task1_task2'
-    # task_name = 'task1_task2_task3'
-    # task_name = 'task1_task2_taskNRv2'
     task_name = args['task_name']
 
     save_path = args['save_path']
@@ -196,14 +166,10 @@ if __name__ == '__main__':
 
     output_checkpoint_name_last = os.path.join(save_path_last, f'{save_name}.pt')
 
-    # subject_choice = 'ALL
     subject_choice = args['subjects']
     print(f'![Debug]using {subject_choice}')
-    # eeg_type_choice = 'GD
     eeg_type_choice = args['eeg_type']
     print(f'[INFO]eeg type {eeg_type_choice}')
-    # bands_choice = ['_t1'] 
-    # bands_choice = ['_t1','_t2','_a1','_a2','_b1','_b2','_g1','_g2'] 
     bands_choice = args['eeg_bands']
     print(f'[INFO]using bands {bands_choice}')
 
@@ -219,35 +185,30 @@ if __name__ == '__main__':
     ''' set up device '''
     # use cuda
     if torch.cuda.is_available():  
-        # dev = "cuda:3" 
         dev = args['cuda'] 
     else:  
         dev = "cpu"
-    # CUDA_VISIBLE_DEVICES=0,1,2,3  
     device = torch.device(dev)
     print(f'[INFO]using device {dev}')
     print()
 
     ''' set up dataloader '''
+    # ---- 使用專案內的 dataset 路徑 ----
     whole_dataset_dicts = []
     if 'task1' in task_name:
-        dataset_path_task1 = 'datasets/ZuCo/task1-SR/pickle/task1-SR-dataset.pickle'
-        dataset_path_task1=os.path.join(home_directory,dataset_path_task1)
+        dataset_path_task1 = os.path.join(PROJECT_ROOT, 'dataset', 'ZuCo', 'task1-SR', 'pickle', 'task1-SR-dataset.pickle')
         with open(dataset_path_task1, 'rb') as handle:
             whole_dataset_dicts.append(pickle.load(handle))
     if 'task2' in task_name:
-        dataset_path_task2 = 'datasets/ZuCo/task2-NR/pickle/task2-NR-dataset.pickle'
-        dataset_path_task2=os.path.join(home_directory,dataset_path_task2)
+        dataset_path_task2 = os.path.join(PROJECT_ROOT, 'dataset', 'ZuCo', 'task2-NR', 'pickle', 'task2-NR-dataset.pickle')
         with open(dataset_path_task2, 'rb') as handle:
             whole_dataset_dicts.append(pickle.load(handle))
     if 'task3' in task_name:
-        dataset_path_task3 = 'datasets/ZuCo/task3-TSR/pickle/task3-TSR-dataset.pickle'
-        dataset_path_task3=os.path.join(home_directory,dataset_path_task3)
+        dataset_path_task3 = os.path.join(PROJECT_ROOT, 'dataset', 'ZuCo', 'task3-TSR', 'pickle', 'task3-TSR-dataset.pickle')
         with open(dataset_path_task3, 'rb') as handle:
             whole_dataset_dicts.append(pickle.load(handle))
     if 'taskNRv2' in task_name:
-        dataset_path_taskNRv2 = 'datasets/ZuCo/task2-NR-2.0/pickle/task2-NR-2.0-dataset.pickle'
-        dataset_path_taskNRv2=os.path.join(home_directory,dataset_path_taskNRv2)
+        dataset_path_taskNRv2 = os.path.join(PROJECT_ROOT, 'dataset', 'ZuCo', 'task2-NR-2.0', 'pickle', 'task2-NR-2.0-dataset.pickle')
         with open(dataset_path_taskNRv2, 'rb') as handle:
             whole_dataset_dicts.append(pickle.load(handle))
 
@@ -273,8 +234,6 @@ if __name__ == '__main__':
     train_set = ZuCo_dataset(whole_dataset_dicts, 'train', tokenizer, subject = subject_choice, eeg_type = eeg_type_choice, bands = bands_choice, setting = dataset_setting)
     # dev dataset
     dev_set = ZuCo_dataset(whole_dataset_dicts, 'dev', tokenizer, subject = subject_choice, eeg_type = eeg_type_choice, bands = bands_choice, setting = dataset_setting)
-    # test dataset
-    # test_set = ZuCo_dataset(whole_dataset_dict, 'test', tokenizer, subject = subject_choice, eeg_type = eeg_type_choice, bands = bands_choice)
 
     dataset_sizes = {'train': len(train_set), 'dev': len(dev_set)}
     print('[INFO]train_set size: ', len(train_set))
@@ -321,7 +280,7 @@ if __name__ == '__main__':
     ''' training loop '''
 
     ######################################################
-    '''step one trainig: freeze most of BART params'''
+    '''step one training: freeze most of BART params'''
     ######################################################
 
     # closely follow BART paper
@@ -365,7 +324,7 @@ if __name__ == '__main__':
         model = train_model(dataloaders, device, model, criterion, optimizer_step1, exp_lr_scheduler_step1, num_epochs=num_epochs_step1, checkpoint_path_best = output_checkpoint_name_best, checkpoint_path_last = output_checkpoint_name_last)
 
     ######################################################
-    '''step two trainig: update whole model for a few iterations'''
+    '''step two training: update whole model for a few iterations'''
     ######################################################
     for name, param in model.named_parameters():
         param.requires_grad = True
@@ -385,6 +344,3 @@ if __name__ == '__main__':
     
     '''main loop'''
     trained_model = train_model(dataloaders, device, model, criterion, optimizer_step2, exp_lr_scheduler_step2, num_epochs=num_epochs_step2, checkpoint_path_best = output_checkpoint_name_best, checkpoint_path_last = output_checkpoint_name_last)
-
-    # '''save checkpoint'''
-    # torch.save(trained_model.state_dict(), os.path.join(save_path,output_checkpoint_name))

@@ -1,13 +1,15 @@
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.data
 from transformers import BartTokenizer, BartForConditionalGeneration, BartConfig, Text2TextGenerationPipeline
 import math
 import numpy as np
+from channel_mapping import BRAIN_REGION_CHANNELS, BRAIN_REGION_CHANNEL_COUNT
 
 """ main architecture for open vocabulary EEG-To-Text decoding"""
 
-# ── EEGNet Encoder（無分類頭）─────────────────────────
+# ── EEGNet Encoder (no classification head) ─────────────────────────
 class EEGNetEncoder(nn.Module):
     def __init__(self, C=105, F1=8, D=2, F2=16, d_model=512, dropout=0.5):
         super().__init__()
@@ -43,7 +45,7 @@ class EEGNetEncoder(nn.Module):
         return x
 
 
-# ── Single View Encoder（一個腦區）───────────────────────
+# ── Single View Encoder (one brain region) ───────────────────────
 class SingleViewEncoder(nn.Module):
     def __init__(self, C, d_model=512, nhead=8, num_layers=6, dropout=0.1):
         super().__init__()
@@ -63,25 +65,12 @@ class SingleViewEncoder(nn.Module):
 
 
 # ── Multi-View Brain Translator ───────────────────────────
-BRAIN_REGION_CHANNEL_COUNT = {
-    'prefrontal':      26,
-    'premotor':        16,
-    'brocas':           4,
-    'auditory_assoc':   9,
-    'primary_motor':    9,
-    'primary_sensory': 11,
-    'somatic_sensory':  9,
-    'auditory':         4,
-    'wernickes':        6,
-    'visual':          11,
-}
-
 class MultiViewBrainTranslator(nn.Module):
     def __init__(self, pretrained_layers, d_model=512, nhead=8,
                  num_layers=6, decoder_embedding_size=1024):
         super().__init__()
 
-        # 10 個腦區各自的 SingleViewEncoder
+        # 10 brain region encoders using channel counts from mapping
         self.view_encoders = nn.ModuleDict({
             region: SingleViewEncoder(C=ch_count, d_model=d_model,
                                       nhead=nhead, num_layers=num_layers)
@@ -95,7 +84,7 @@ class MultiViewBrainTranslator(nn.Module):
         )
         self.global_transformer = nn.TransformerEncoder(global_layer, num_layers=3)
 
-        # 投影到 BART embedding 維度
+        # Project to BART embedding dimension
         self.fc1 = nn.Linear(d_model, decoder_embedding_size)
 
         # BART
@@ -109,14 +98,14 @@ class MultiViewBrainTranslator(nn.Module):
         combined = torch.cat(view_outputs, dim=1)     # (batch, 10*T/4, d_model)
         global_out = self.global_transformer(combined) # (batch, 10*T/4, d_model)
         projected = F.relu(self.fc1(global_out))       # (batch, 10*T/4, 1024)
-    
-        # 截斷到 BART 最大長度 1024
+        
+        # truncate to BART max position length 1024
         projected = projected[:, :1024, :]
         return projected
 
     def forward(self, view_inputs, input_masks_batch, input_masks_invert, target_ids_batch_converted):
         encoded = self.addin_forward(view_inputs)     # (batch, seq', 1024)
-        # 產生對應長度的 attention mask
+        # generate attention mask for the encoded length
         attn_mask = torch.ones(encoded.shape[0], encoded.shape[1]).to(encoded.device)
         out = self.pretrained(
             inputs_embeds=encoded,
@@ -150,9 +139,6 @@ class BrainTranslator(nn.Module):
                                                                    batch_first=True)
         self.additional_encoder = nn.TransformerEncoder(self.additional_encoder_layer, num_layers=6)
 
-        # print('[INFO]adding positional embedding')
-        # self.positional_embedding = PositionalEncoding(in_feature)
-
         self.fc1 = nn.Linear(in_feature, decoder_embedding_size)
 
     def addin_forward(self, input_embeddings_batch, input_masks_invert):
@@ -160,11 +146,7 @@ class BrainTranslator(nn.Module):
         """input_mask: 1 is not masked, 0 is masked"""
         """input_masks_invert: 1 is masked, 0 is not masked"""
 
-        # input_embeddings_batch = self.positional_embedding(input_embeddings_batch)
-        # use src_key_padding_masks
         encoded_embedding = self.additional_encoder(input_embeddings_batch, src_key_padding_mask=input_masks_invert)
-
-        # encoded_embedding = self.additional_encoder(input_embeddings_batch)
         encoded_embedding = F.relu(self.fc1(encoded_embedding))
         return encoded_embedding
 
@@ -204,7 +186,6 @@ class BrainTranslator(nn.Module):
 
     def forward(self, input_embeddings_batch, input_masks_batch, input_masks_invert, target_ids_batch_converted):
         encoded_embedding = self.addin_forward(input_embeddings_batch, input_masks_invert)
-        # print(f'forward:{input_embeddings_batch.shape,input_masks_batch.shape,input_masks_invert.shape,target_ids_batch_converted.shape,encoded_embedding.shape}')
         out = self.pretrained(inputs_embeds=encoded_embedding, attention_mask=input_masks_batch,
                               return_dict=True, labels=target_ids_batch_converted)
 
@@ -243,8 +224,6 @@ class Pooler(nn.Module):
         self.activation = nn.Tanh()
 
     def forward(self, hidden_states):
-        # We "pool" the model by simply taking the hidden state corresponding
-        # to the first token.
         first_token_tensor = hidden_states[:, 0]
         pooled_output = self.dense(first_token_tensor)
         pooled_output = self.activation(pooled_output)
@@ -267,10 +246,7 @@ class PositionalEncoding(nn.Module):
         self.register_buffer('pe', pe)
 
     def forward(self, x):
-        # print('[DEBUG] input size:', x.size())
-        # print('[DEBUG] positional embedding size:', self.pe.size())
         x = x + self.pe[:x.size(0), :]
-        # print('[DEBUG] output x with pe size:', x.size())
         return self.dropout(x)
 
 
@@ -313,7 +289,7 @@ class ContrastiveBrainTextEncoder(nn.Module):
                                                         dim_feedforward=eeg_encoder_dim_feedforward, batch_first=True)
         self.EEG_Encoder = nn.TransformerEncoder(self.encoder_layer, num_layers=6)
         self.EEG_pooler = Pooler(in_feature)
-        self.ln_final = nn.LayerNorm(in_feature)  # to be considered
+        self.ln_final = nn.LayerNorm(in_feature)
 
         # project to text embedding
         self.EEG_projection = nn.Parameter(torch.empty(in_feature, embed_dim))
@@ -325,27 +301,21 @@ class ContrastiveBrainTextEncoder(nn.Module):
         self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
 
     def forward(self, input_EEG_features, input_EEG_attn_mask, input_ids, input_text_attention_masks):
-        # add positional embedding
         input_EEG_features = self.positional_embedding(input_EEG_features)
-        # get EEG feature embedding
         EEG_hiddenstates = self.EEG_Encoder(input_EEG_features, src_key_padding_mask=input_EEG_attn_mask)
         EEG_hiddenstates = self.ln_final(EEG_hiddenstates)
-        EEG_features = self.EEG_pooler(EEG_hiddenstates)  # [N, 840]
+        EEG_features = self.EEG_pooler(EEG_hiddenstates)
 
-        # project to text embed size
-        EEG_features = EEG_features @ self.EEG_projection  # [N, 768]
+        EEG_features = EEG_features @ self.EEG_projection
 
-        # get text feature embedding
         Text_features = self.TextEncoder(input_ids=input_ids, attention_mask=input_text_attention_masks,
-                                         return_dict=True).pooler_output  # [N, 768]
+                                         return_dict=True).pooler_output
 
-        # normalized features
-        EEG_features = EEG_features / EEG_features.norm(dim=-1, keepdim=True)  # [N, 768]
-        Text_features = Text_features / Text_features.norm(dim=-1, keepdim=True)  # [N, 768]
+        EEG_features = EEG_features / EEG_features.norm(dim=-1, keepdim=True)
+        Text_features = Text_features / Text_features.norm(dim=-1, keepdim=True)
 
-        # cosine similarity as logits
         logit_scale = self.logit_scale.exp()
-        logits_per_EEG = logit_scale * EEG_features @ Text_features.t()  # [N, N]
-        logits_per_text = logit_scale * Text_features @ EEG_features.t()  # [N, N]
+        logits_per_EEG = logit_scale * EEG_features @ Text_features.t()
+        logits_per_text = logit_scale * Text_features @ EEG_features.t()
 
         return logits_per_EEG, logits_per_text
