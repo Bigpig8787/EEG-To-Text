@@ -4,11 +4,11 @@ import h5py
 import numpy as np
 import os
 
-home = os.path.expanduser("~")
+home = r"D:\EEG-BCI\EEG-To-Text"
 
 # === 檢查 v1 ===
 print("=== ZuCo v1 (task1-SR) ===")
-v1_dir = os.path.join(home, "datasets/ZuCo/task1-SR/Matlab_files")
+v1_dir = os.path.join(home, "dataset", "ZuCo", "task1- SR", "Matlab files")
 v1_files = sorted(os.listdir(v1_dir))
 if v1_files:
     f1 = io.loadmat(os.path.join(v1_dir, v1_files[0]), squeeze_me=True, struct_as_record=False)
@@ -35,7 +35,7 @@ if v1_files:
 
 # === 檢查 v2 ===
 print("\n=== ZuCo v2 (task2-NR-2.0) ===")
-v2_dir = os.path.join(home, "datasets/ZuCo/task2-NR-2.0/Matlab_files")
+v2_dir = os.path.join(home, "dataset", "ZuCo", "task2 - NR-2.0", "Matlab files")
 v2_files = [f for f in sorted(os.listdir(v2_dir)) if f.endswith("NR.mat")]
 if v2_files:
     f2 = h5py.File(os.path.join(v2_dir, v2_files[0]), 'r')
