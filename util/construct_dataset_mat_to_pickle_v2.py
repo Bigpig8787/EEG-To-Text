@@ -6,25 +6,25 @@ from glob import glob
 from tqdm import tqdm
 import pickle
 
-home_directory = os.path.expanduser("~")
+# ---- 路徑設定：指向專案根目錄（util/ 的上一層）----
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
-rootdir = os.path.join(home_directory,"datasets/ZuCo/task2-NR-2.0/Matlab_files/")
+rootdir = os.path.join(PROJECT_ROOT, "dataset", "ZuCo", "task2-NR-2.0", "Matlab files")
 
 task = "NR"
 
 print('##############################')
 print(f'start processing ZuCo task2-NR-2.0...')
+print(f'input dir: {rootdir}')
 
 dataset_dict = {}
 
 for file in tqdm(os.listdir(rootdir)):
     if file.endswith(task+".mat"):
 
-        file_name = rootdir + file
+        file_name = os.path.join(rootdir, file)
 
-        # print('file name:', file_name)
         subject = file_name.split("results")[1].split("_")[0]
-        # print('subject: ', subject)
 
         # exclude YMH due to incomplete data because of dyslexia
         if subject != 'YMH':
@@ -32,12 +32,9 @@ for file in tqdm(os.listdir(rootdir)):
             dataset_dict[subject] = []
 
             f = h5py.File(file_name,'r')
-            # print('keys in f:', list(f.keys()))
             sentence_data = f['sentenceData']
-            # print('keys in sentence_data:', list(sentence_data.keys()))
             
             # sent level eeg 
-            # mean_t1 = np.squeeze(f[sentence_data['mean_t1'][0][0]][()])
             mean_t1_objs = sentence_data['mean_t1']
             mean_t2_objs = sentence_data['mean_t2']
             mean_a1_objs = sentence_data['mean_a1']
@@ -49,7 +46,6 @@ for file in tqdm(os.listdir(rootdir)):
             
             rawData = sentence_data['rawData']
             contentData = sentence_data['content']
-            # print('contentData shape:', contentData.shape, 'dtype:', contentData.dtype)
             omissionR = sentence_data['omissionRate']
             wordData = sentence_data['word']
 
@@ -58,7 +54,6 @@ for file in tqdm(os.listdir(rootdir)):
                 # get sentence string
                 obj_reference_content = contentData[idx][0]
                 sent_string = dh.load_matlab_string(f[obj_reference_content])
-                # print('sentence string:', sent_string)
                 
                 sent_obj = {'content':sent_string}
                 
@@ -82,7 +77,7 @@ for file in tqdm(os.listdir(rootdir)):
                         # v2 shape is (T, 105), transpose to (105, T) for consistency
                         if raw.shape[1] == 105:
                             raw = raw.T
-                        # now raw is (105, T)
+                        # now raw should be (105, T)
                         if raw.shape[0] == 105:
                             sent_obj['rawData'] = raw
                         else:
@@ -93,7 +88,6 @@ for file in tqdm(os.listdir(rootdir)):
                     print(f'  failed to read rawData for idx={idx}: {e}')
                 # ---- END NEW ----
 
-                # print(sent_obj)
                 sent_obj['word'] = []
 
                 # get word level data
@@ -113,7 +107,6 @@ for file in tqdm(os.listdir(rootdir)):
                         data_dict = word_data[widx]
                         word_obj = {'content':data_dict['content'], 'nFixations': data_dict['nFix']}
                         if 'GD_EEG' in data_dict:
-                            # print('has fixation: ', data_dict['content'])
                             gd = data_dict["GD_EEG"]
                             ffd = data_dict["FFD_EEG"]
                             trt = data_dict["TRT_EEG"]
@@ -128,10 +121,6 @@ for file in tqdm(os.listdir(rootdir)):
                     sent_obj['word_tokens_has_fixation'] = word_tokens_has_fixation
                     sent_obj['word_tokens_with_mask'] = word_tokens_with_mask
                     sent_obj['word_tokens_all'] = word_tokens_all     
-                    
-                    # print(sent_obj.keys())
-                    # print(len(sent_obj['word']))
-                    # print(sent_obj['word'][0])
 
                     dataset_dict[subject].append(sent_obj)
 
@@ -142,23 +131,22 @@ if dataset_dict == {}:
     print(f'No mat file found for {task_name}')
     quit()
 
-output_dir = os.path.join(home_directory,f'datasets/ZuCo/{task_name}/pickle')
+output_dir = os.path.join(PROJECT_ROOT, "dataset", "ZuCo", task_name, "pickle")
 if not os.path.exists(output_dir):
     os.makedirs(output_dir)
 
 output_name = f'{task_name}-dataset.pickle'
-# with open(os.path.join(output_dir,'task1-SR-dataset.json'), 'w') as out:
-#     json.dump(dataset_dict,out,indent = 4)
 
-with open(os.path.join(output_dir,output_name), 'wb') as handle:
+with open(os.path.join(output_dir, output_name), 'wb') as handle:
     pickle.dump(dataset_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
-    print('write to:', os.path.join(output_dir,output_name))
+    print('write to:', os.path.join(output_dir, output_name))
 
 """sanity check"""
 print('subjects:', dataset_dict.keys())
-print('num of sent:', len(dataset_dict['YAC']))
+first_subj = list(dataset_dict.keys())[0]
+print('num of sent:', len(dataset_dict[first_subj]))
 
-# NEW: verify rawData was saved
+# verify rawData was saved
 for subj in dataset_dict:
     for i, s in enumerate(dataset_dict[subj]):
         if s is not None and 'rawData' in s:
