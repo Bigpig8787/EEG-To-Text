@@ -109,6 +109,9 @@ class MultiViewBrainTranslator(nn.Module):
         combined = torch.cat(view_outputs, dim=1)     # (batch, 10*T/4, d_model)
         global_out = self.global_transformer(combined) # (batch, 10*T/4, d_model)
         projected = F.relu(self.fc1(global_out))       # (batch, 10*T/4, 1024)
+    
+        # 截斷到 BART 最大長度 1024
+        projected = projected[:, :1024, :]
         return projected
 
     def forward(self, view_inputs, input_masks_batch, input_masks_invert, target_ids_batch_converted):

@@ -262,7 +262,7 @@ if __name__ == '__main__':
     with open(os.path.join(cfg_dir,f'{save_name}.json'), 'w') as out_config:
         json.dump(args, out_config, indent = 4)
 
-    if model_name in ['BrainTranslator','BrainTranslatorNaive']:
+    if model_name in ['BrainTranslator','BrainTranslatorNaive','MultiViewBrainTranslator']:
         tokenizer = BartTokenizer.from_pretrained('facebook/bart-large')
     elif model_name == 'BertGeneration':
         tokenizer = BertTokenizer.from_pretrained('bert-base-cased')
