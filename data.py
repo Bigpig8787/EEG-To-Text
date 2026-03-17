@@ -135,6 +135,12 @@ def get_input_sample(sent_obj, tokenizer, eeg_type = 'GD', bands = ['_t1','_t2',
         print('discard length zero instance: ', target_string)
         return None
 
+    if 'raw_eeg_views' in sent_obj:
+        input_sample['raw_eeg_views'] = {
+            region: torch.FloatTensor(arr)
+            for region, arr in sent_obj['raw_eeg_views'].items()
+        }
+
     return input_sample
 
 class ZuCo_dataset(Dataset):
@@ -227,7 +233,8 @@ class ZuCo_dataset(Dataset):
             input_sample['target_ids'], 
             input_sample['target_mask'], 
             input_sample['sentiment_label'], 
-            input_sample['sent_level_EEG']
+            input_sample['sent_level_EEG'],
+            input_sample.get('raw_eeg_views', {})
         )
         # keys: input_embeddings, input_attn_mask, input_attn_mask_invert, target_ids, target_mask, 
 

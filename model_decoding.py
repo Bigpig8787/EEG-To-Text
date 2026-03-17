@@ -7,6 +7,133 @@ import numpy as np
 
 """ main architecture for open vocabulary EEG-To-Text decoding"""
 
+# ── EEGNet Encoder（無分類頭）─────────────────────────
+class EEGNetEncoder(nn.Module):
+    def __init__(self, C=105, F1=8, D=2, F2=16, d_model=512, dropout=0.5):
+        super().__init__()
+        self.temporal_conv = nn.Sequential(
+            nn.Conv2d(1, F1, kernel_size=(1, 64), padding=(0, 31), bias=False),
+            nn.BatchNorm2d(F1),
+        )
+        self.depthwise_conv = nn.Sequential(
+            nn.Conv2d(F1, F1*D, kernel_size=(C, 1), groups=F1, bias=False),
+            nn.BatchNorm2d(F1*D),
+            nn.ELU(),
+            nn.AvgPool2d(kernel_size=(1, 2)),
+            nn.Dropout(dropout),
+        )
+        self.separable_conv = nn.Sequential(
+            nn.Conv2d(F1*D, F2, kernel_size=(1, 16), padding=(0, 8), bias=False),
+            nn.BatchNorm2d(F2),
+            nn.ELU(),
+            nn.AvgPool2d(kernel_size=(1, 2)),
+            nn.Dropout(dropout),
+        )
+        self.projection = nn.Linear(F2, d_model)
+
+    def forward(self, x):
+        # x: (batch, C, T)
+        x = x.unsqueeze(1)              # (batch, 1, C, T)
+        x = self.temporal_conv(x)       # (batch, F1, C, T)
+        x = self.depthwise_conv(x)      # (batch, F1*D, 1, T/2)
+        x = self.separable_conv(x)      # (batch, F2, 1, T/4)
+        x = x.squeeze(2)               # (batch, F2, T/4)
+        x = x.permute(0, 2, 1)        # (batch, T/4, F2)
+        x = self.projection(x)         # (batch, T/4, d_model)
+        return x
+
+
+# ── Single View Encoder（一個腦區）───────────────────────
+class SingleViewEncoder(nn.Module):
+    def __init__(self, C, d_model=512, nhead=8, num_layers=6, dropout=0.1):
+        super().__init__()
+        self.eegnet = EEGNetEncoder(C=C, d_model=d_model)
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model, nhead=nhead,
+            dim_feedforward=d_model*4,
+            dropout=dropout, batch_first=True
+        )
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+
+    def forward(self, x):
+        # x: (batch, C_region, T)
+        x = self.eegnet(x)       # (batch, T/4, d_model)
+        x = self.transformer(x)  # (batch, T/4, d_model)
+        return x
+
+
+# ── Multi-View Brain Translator ───────────────────────────
+BRAIN_REGION_CHANNEL_COUNT = {
+    'prefrontal':      26,
+    'premotor':        16,
+    'brocas':           4,
+    'auditory_assoc':   9,
+    'primary_motor':    9,
+    'primary_sensory': 11,
+    'somatic_sensory':  9,
+    'auditory':         4,
+    'wernickes':        6,
+    'visual':          11,
+}
+
+class MultiViewBrainTranslator(nn.Module):
+    def __init__(self, pretrained_layers, d_model=512, nhead=8,
+                 num_layers=6, decoder_embedding_size=1024):
+        super().__init__()
+
+        # 10 個腦區各自的 SingleViewEncoder
+        self.view_encoders = nn.ModuleDict({
+            region: SingleViewEncoder(C=ch_count, d_model=d_model,
+                                      nhead=nhead, num_layers=num_layers)
+            for region, ch_count in BRAIN_REGION_CHANNEL_COUNT.items()
+        })
+
+        # Global Transformer
+        global_layer = nn.TransformerEncoderLayer(
+            d_model=d_model, nhead=nhead,
+            dim_feedforward=d_model*4, batch_first=True
+        )
+        self.global_transformer = nn.TransformerEncoder(global_layer, num_layers=3)
+
+        # 投影到 BART embedding 維度
+        self.fc1 = nn.Linear(d_model, decoder_embedding_size)
+
+        # BART
+        self.pretrained = pretrained_layers
+
+    def addin_forward(self, view_inputs):
+        view_outputs = []
+        for region, encoder in self.view_encoders.items():
+            out = encoder(view_inputs[region])  # (batch, T/4, d_model)
+            view_outputs.append(out)
+        combined = torch.cat(view_outputs, dim=1)     # (batch, 10*T/4, d_model)
+        global_out = self.global_transformer(combined) # (batch, 10*T/4, d_model)
+        projected = F.relu(self.fc1(global_out))       # (batch, 10*T/4, 1024)
+        return projected
+
+    def forward(self, view_inputs, input_masks_batch, input_masks_invert, target_ids_batch_converted):
+        encoded = self.addin_forward(view_inputs)     # (batch, seq', 1024)
+        # 產生對應長度的 attention mask
+        attn_mask = torch.ones(encoded.shape[0], encoded.shape[1]).to(encoded.device)
+        out = self.pretrained(
+            inputs_embeds=encoded,
+            attention_mask=attn_mask,
+            return_dict=True,
+            labels=target_ids_batch_converted
+        )
+        return out
+
+    @torch.no_grad()
+    def generate(self, view_inputs, input_masks_batch, input_masks_invert,
+                 target_ids_batch_converted, **kwargs):
+        encoded = self.addin_forward(view_inputs)
+        attn_mask = torch.ones(encoded.shape[0], encoded.shape[1]).to(encoded.device)
+        return self.pretrained.generate(
+            inputs_embeds=encoded,
+            attention_mask=attn_mask,
+            **kwargs
+        )
+
 
 class BrainTranslator(nn.Module):
     def __init__(self, pretrained_layers, in_feature=840, decoder_embedding_size=1024, additional_encoder_nhead=8,

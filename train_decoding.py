@@ -17,7 +17,7 @@ from transformers import BertLMHeadModel, BartTokenizer, BartForConditionalGener
     RobertaForSequenceClassification
 
 from data import ZuCo_dataset
-from model_decoding import BrainTranslator, BrainTranslatorNaive
+from model_decoding import BrainTranslator, BrainTranslatorNaive, MultiViewBrainTranslator
 from config import get_config
 
 
@@ -46,7 +46,7 @@ def train_model(dataloaders, device, model, criterion, optimizer, scheduler, num
 
             # Iterate over data.
             for (input_embeddings, seq_len, input_masks, input_mask_invert,
-                 target_ids, target_mask, sentiment_labels, sent_level_EEG) in tqdm(dataloaders[phase]):
+                 target_ids, target_mask, sentiment_labels, sent_level_EEG, raw_eeg_views) in tqdm(dataloaders[phase]):
                 # print(input_embeddings, seq_len, input_masks, input_mask_invert,
                 #  target_ids, target_mask, sentiment_labels, sent_level_EEG)
                 # load in batch
@@ -61,8 +61,13 @@ def train_model(dataloaders, device, model, criterion, optimizer, scheduler, num
                 optimizer.zero_grad()
 
                 # forward
-                seq2seqLMoutput = model(input_embeddings_batch, input_masks_batch, input_mask_invert_batch,
-                                        target_ids_batch)
+                if model_name == 'MultiViewBrainTranslator':
+                    view_inputs = {k: v.to(device).float() for k, v in raw_eeg_views.items()}
+                    seq2seqLMoutput = model(view_inputs, input_masks_batch,
+                                            input_mask_invert_batch, target_ids_batch)
+                else:
+                    seq2seqLMoutput = model(input_embeddings_batch, input_masks_batch,
+                                            input_mask_invert_batch, target_ids_batch)
 
                 """calculate loss"""
                 # logits = seq2seqLMoutput.logits # 8*48*50265
@@ -298,7 +303,19 @@ if __name__ == '__main__':
     elif model_name == 'BrainTranslatorNaive':
         pretrained = BartForConditionalGeneration.from_pretrained('facebook/bart-large')
         model = BrainTranslatorNaive(pretrained, in_feature = 105*len(bands_choice), decoder_embedding_size = 1024, additional_encoder_nhead=8, additional_encoder_dim_feedforward = 2048)
-
+    elif model_name == 'MultiViewBrainTranslator':
+        if use_random_init:
+            config = BartConfig.from_pretrained('facebook/bart-large')
+            pretrained = BartForConditionalGeneration(config)
+        else:
+            pretrained = BartForConditionalGeneration.from_pretrained('facebook/bart-large')
+        model = MultiViewBrainTranslator(
+            pretrained,
+            d_model=512,
+            nhead=8,
+            num_layers=6,
+            decoder_embedding_size=1024
+        )
     model.to(device)
     
     ''' training loop '''
@@ -308,7 +325,7 @@ if __name__ == '__main__':
     ######################################################
 
     # closely follow BART paper
-    if model_name in ['BrainTranslator','BrainTranslatorNaive']:
+    if model_name in ['BrainTranslator','BrainTranslatorNaive','MultiViewBrainTranslator']:
         for name, param in model.named_parameters():
             if param.requires_grad and 'pretrained' in name:
                 if ('shared' in name) or ('embed_positions' in name) or ('encoder.layers.0' in name):
