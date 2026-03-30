@@ -20,6 +20,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+import torch.nn.functional as F
 
 from model_pretrain import ConformerPreTrainModel, create_remask
 from data_pretrain import EEGPretrainDataset, RAW_EEG_MAX_LEN
