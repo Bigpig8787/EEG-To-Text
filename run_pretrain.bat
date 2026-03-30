@@ -1,0 +1,13 @@
+python train_pretrain.py ^
+    -cuda cuda:0 ^
+    -b 4 ^
+    -ne 50 ^
+    -lr 0.00005 ^
+    --d_model 256 ^
+    --n_filters 40 ^
+    --temporal_kernel 25 ^
+    --pool_stride 50 ^
+    --n_heads 8 ^
+    --n_transformer_layers 4 ^
+    --mask_ratio 0.15 ^
+    -s ./checkpoints/pretrain
