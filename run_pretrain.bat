@@ -6,8 +6,8 @@ python train_pretrain.py ^
     --d_model 256 ^
     --n_filters 40 ^
     --temporal_kernel 25 ^
-    --pool_stride 50 ^
+    --pool_stride 15 ^
     --n_heads 8 ^
     --n_transformer_layers 4 ^
     --mask_ratio 0.15 ^
-    -s ./checkpoints/pretrain
+    -s ./checkpoints/pretrain_stride15
