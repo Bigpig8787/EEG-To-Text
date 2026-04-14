@@ -1,7 +1,7 @@
 python train_multiview_conformer.py ^
     --model_name MultiViewConformerTranslator ^
     --task_name task1_task2_taskNRv2 ^
-    --one_step ^
+    --two_step ^
     --pretrained ^
     --not_load_step1_checkpoint ^
     --num_epoch_step1 20 ^
@@ -9,5 +9,5 @@ python train_multiview_conformer.py ^
     -lr1 0.00005 ^
     -lr2 0.0000005 ^
     -b 4 ^
-    -s ./checkpoints/multiview_conformer ^
+    -s ./checkpoints/multiview_conformer_2step ^
     -cuda cuda:0
