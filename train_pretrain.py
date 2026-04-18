@@ -29,9 +29,9 @@ def get_args():
     parser.add_argument('--temporal_kernel', type=int, default=25)
     parser.add_argument('--pool_stride', type=int, default=10)
     parser.add_argument('--n_heads', type=int, default=8)
-    parser.add_argument('--n_transformer_layers', type=int, default=4)
-    parser.add_argument('--dropout', type=float, default=0.1)
-    parser.add_argument('--mask_ratio', type=float, default=0.15)
+    parser.add_argument('--n_transformer_layers', type=int, default=2)
+    parser.add_argument('--dropout', type=float, default=0.2)
+    parser.add_argument('--mask_ratio', type=float, default=0.30)
     parser.add_argument('-s', '--save_path', default='./checkpoints/pretrain')
     return vars(parser.parse_args())
 

@@ -20,6 +20,7 @@ import copy
 import json
 import pickle
 import time
+import random
 
 import numpy as np
 import torch
@@ -35,6 +36,36 @@ from peft import LoraConfig, TaskType, get_peft_model
 from config import get_config
 from data.dataset import ZuCo_dataset
 from models.multiview import MultiViewConformerTranslator
+
+
+def augment_eeg_views(view_inputs: dict, is_train: bool = True) -> dict:
+    """EEG data augmentation applied per-batch during training.
+
+    Three transforms applied independently with independent probabilities:
+      - Amplitude scaling  (p=0.7): multiply by uniform(0.80, 1.20)
+      - Gaussian noise     (p=0.5): add N(0, 0.03) noise
+      - Time shift         (p=0.5): circular roll ±5 % of T
+    """
+    if not is_train:
+        return view_inputs
+    augmented = {}
+    for region, eeg in view_inputs.items():
+        # eeg: (B, C, T)
+        B, C, T = eeg.shape
+        # amplitude scale
+        if random.random() < 0.7:
+            scale = torch.empty(B, 1, 1, device=eeg.device).uniform_(0.80, 1.20)
+            eeg = eeg * scale
+        # Gaussian noise
+        if random.random() < 0.5:
+            eeg = eeg + torch.randn_like(eeg) * 0.03
+        # time shift
+        if random.random() < 0.5:
+            shift = random.randint(-T // 20, T // 20)
+            if shift != 0:
+                eeg = torch.roll(eeg, shift, dims=2)
+        augmented[region] = eeg
+    return augmented
 
 PROJECT_ROOT = os.path.abspath(os.path.dirname(__file__))
 
@@ -80,6 +111,8 @@ def train_model(dataloaders, device, model, tokenizer, optimizer, scheduler, sca
                 mask_inv_batch = mask_inv.to(device)
                 view_inputs = {k: v.to(device).float() for k, v in raw_views.items()}
                 target_ids_batch[target_ids_batch == tokenizer.pad_token_id] = -100
+
+                view_inputs = augment_eeg_views(view_inputs, is_train=(phase == 'train'))
 
                 with torch.set_grad_enabled(phase == 'train'):
                     with autocast():
@@ -212,7 +245,7 @@ if __name__ == '__main__':
     model = MultiViewConformerTranslator(
         bart, d_model=512, n_filters=40, temporal_kernel=25,
         pool_stride=10, tokens_per_view=100, n_heads=8,
-        n_encoder_layers=4, n_global_layers=3, dropout=0.1,
+        n_encoder_layers=2, n_global_layers=2, dropout=0.3,
         decoder_embedding_size=1024,
     )
 
@@ -245,7 +278,7 @@ if __name__ == '__main__':
                   list(model.fc1.parameters()))
     total_s1 = (len(train_loader) // GRAD_ACCUM) * STEP1_EPOCHS
     warm_s1  = int(total_s1 * WARMUP_RATIO)
-    opt1     = optim.AdamW(enc_params, lr=LR1, weight_decay=0.01)
+    opt1     = optim.AdamW(enc_params, lr=LR1, weight_decay=0.05)
     sch1     = get_cosine_schedule_with_warmup(opt1, warm_s1, total_s1)
 
     print(f'[INFO] Step-1 trainable params: {sum(p.numel() for p in enc_params):,}')
@@ -266,7 +299,7 @@ if __name__ == '__main__':
 
     lora_cfg = LoraConfig(
         task_type=TaskType.SEQ_2_SEQ_LM,
-        r=LORA_R, lora_alpha=LORA_ALPHA, lora_dropout=0.1,
+        r=LORA_R, lora_alpha=LORA_ALPHA, lora_dropout=0.15,
         target_modules=LORA_TARGETS,
     )
     model.pretrained = get_peft_model(model.pretrained, lora_cfg)
@@ -284,11 +317,13 @@ if __name__ == '__main__':
         else:
             other_p2.append(param)
 
+    # LoRA adapters need LR >= encoder LR to adapt BART effectively.
+    # The previous LR2*0.1 was 10× too slow and is the primary cause of poor free-gen scores.
     opt2 = optim.AdamW([
         {'params': enc_p2,   'lr': LR2},
-        {'params': lora_p2,  'lr': LR2 * 0.1},
+        {'params': lora_p2,  'lr': LR2 * 2.0},  # LoRA higher than enc: fast BART adaptation
         {'params': other_p2, 'lr': LR2 * 0.5},
-    ], weight_decay=0.01)
+    ], weight_decay=0.05)
 
     total_s2 = (len(train_loader) // GRAD_ACCUM) * STEP2_EPOCHS
     warm_s2  = int(total_s2 * WARMUP_RATIO)

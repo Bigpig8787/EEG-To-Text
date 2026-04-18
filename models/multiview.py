@@ -12,6 +12,7 @@ import torch.nn.functional as F
 import random
 
 from models.conformer import ConformerEncoder, PositionalEncoding
+from models.base import BaseEEGModel
 from data.channel_mapping import BRAIN_REGION_CHANNEL_COUNT
 
 
@@ -62,7 +63,7 @@ class RegionalConformerEncoder(nn.Module):
         return x
 
 
-class MultiViewConformerTranslator(nn.Module):
+class MultiViewConformerTranslator(BaseEEGModel):
     def __init__(self, pretrained_bart, d_model=512, n_filters=40,
                  temporal_kernel=25, pool_stride=10,
                  tokens_per_view=100,
@@ -87,9 +88,31 @@ class MultiViewConformerTranslator(nn.Module):
             d_model=d_model, nhead=n_heads,
             dim_feedforward=d_model * 4, dropout=dropout, batch_first=True
         )
-        self.global_transformer = nn.TransformerEncoder(global_layer, num_layers=n_global_layers)
+        self._global_transformer = nn.TransformerEncoder(global_layer, num_layers=n_global_layers)
         self.fc1 = nn.Linear(d_model, decoder_embedding_size)
         self.pretrained = pretrained_bart
+
+    # ── BaseEEGModel interface ──────────────────────────────────────
+
+    @property
+    def eeg_encoder(self):
+        return self.view_encoders
+
+    @property
+    def global_transformer(self):
+        return self._global_transformer
+
+    @property
+    def language_model(self):
+        return self.pretrained
+
+    def get_tuning_targets(self):
+        enc = (list(self.view_encoders.parameters()) +
+               list(self._global_transformer.parameters()) +
+               list(self.fc1.parameters()))
+        return {'encoder': enc, 'lm': list(self.pretrained.parameters())}
+
+    # ── End BaseEEGModel interface ──────────────────────────────────
 
     def load_pretrained_encoder(self, pretrained_encoder_path):
         """Load pre-trained weights: temporal conv + projection + transformer."""
@@ -124,7 +147,7 @@ class MultiViewConformerTranslator(nn.Module):
             for p in self.view_encoders[region].parameters():
                 p.requires_grad = requires_grad
         # global transformer, fc1 always trainable
-        for p in self.global_transformer.parameters():
+        for p in self._global_transformer.parameters():
             p.requires_grad = True
         for p in self.fc1.parameters():
             p.requires_grad = True
@@ -136,7 +159,7 @@ class MultiViewConformerTranslator(nn.Module):
             out = encoder(view_inputs[region])
             view_outputs.append(out)
         combined = torch.cat(view_outputs, dim=1)
-        global_out = self.global_transformer(combined)
+        global_out = self._global_transformer(combined)
         projected = F.relu(self.fc1(global_out))
         return projected
 
