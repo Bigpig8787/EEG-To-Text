@@ -90,8 +90,9 @@ class PretrainPipeline:
                     with torch.set_grad_enabled(is_train):
                         if is_train and scaler:
                             with autocast():
-                                recon = model(masked)
-                                loss  = mse(recon[mask], raw_eeg[mask])
+                                recon    = model(masked)
+                                mask_exp = mask.expand_as(raw_eeg)
+                                loss     = mse(recon[mask_exp], raw_eeg[mask_exp])
                             scaler.scale(loss).backward()
                             scaler.unscale_(opt)
                             nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -100,8 +101,9 @@ class PretrainPipeline:
                             opt.zero_grad()
                         else:
                             with torch.no_grad():
-                                recon = model(masked)
-                                loss  = mse(recon[mask], raw_eeg[mask])
+                                recon    = model(masked)
+                                mask_exp = mask.expand_as(raw_eeg)
+                                loss     = mse(recon[mask_exp], raw_eeg[mask_exp])
 
                     total_loss += loss.item() * raw_eeg.size(0)
                     n += raw_eeg.size(0)
