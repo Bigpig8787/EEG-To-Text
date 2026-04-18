@@ -1,128 +1,455 @@
-# EEG-To-Text: 多視角 Conformer 與 EEG 預訓練
+# EEG-To-Text：多視角 Conformer + LoRA 微調
 
-本專案實作了開放詞彙的 EEG 到文本（EEG-to-Text）解碼，結合了 Conformer 編碼器、EEG 預訓練技術以及多視角 Transformer 架構。透過 ZuCo 資料集，本專案提供了一個強大的 Pipeline，能將大腦信號解碼為自然語言。
-
-本專案基於以下研究：
-- [EEG2TEXT (Liu et al., 2024)](https://arxiv.org/abs/2405.02165)
-- [EEG Conformer (Song et al., 2022)](https://ieeexplore.ieee.org/document/9991178)
+本專案實作論文 [arxiv 2405.02165](https://arxiv.org/abs/2405.02165) 的 Multi-View EEG-to-Text 解碼系統。
+以 10 個腦區的原始 EEG 訊號為輸入，透過 Conformer 編碼器 + BART 解碼器生成對應文字。
 
 ---
 
-## 🏗️ 新架構總覽
+## 目錄結構
 
-專案已重構為模組化、面向 Pipeline 的架構，以提升可維護性與實驗靈活性。
-
-```text
+```
 EEG-To-Text/
-├── models/
-│   ├── base.py              # BaseEEGModel 抽象介面
-│   ├── multiview.py         # 多視角 Conformer 翻譯器（實作 BaseEEGModel）
-│   ├── conformer.py         # 共享的 Conformer 編碼器區塊
-│   └── brain_translator.py  # 基準模型 (Wang & Ji, 2021)
 ├── data/
-│   ├── pipeline.py          # EEGDataPipeline（載入、快取、生成 DataLoader）
-│   └── channel_mapping.py   # 105 通道 → 10 個腦區的映射
+│   ├── dataset.py            # ZuCo_dataset：EEG+文字對齊資料集
+│   ├── pretrain_dataset.py   # EEGPretrainDataset：僅原始 EEG，供預訓練用
+│   ├── channel_mapping.py    # 105 通道 → 10 腦區映射
+│   └── pipeline.py           # EEGDataPipeline：DataLoader 封裝
+├── models/
+│   ├── base.py               # BaseEEGModel 抽象介面
+│   ├── conformer.py          # ConformerEncoder（共用骨幹）
+│   ├── multiview.py          # MultiViewConformerTranslator（主模型）
+│   ├── brain_translator.py   # BrainTranslator / BrainTranslatorNaive（基準模型）
+│   └── pretrain_model.py     # ConformerPreTrainModel（預訓練用）
 ├── training/
-│   ├── trainer.py           # Trainer + TrainerConfig（訓練迴圈核心）
-│   ├── pretrain_pipeline.py # PretrainPipeline（遮蔽重建預訓練）
-│   └── finetune_pipeline.py # FinetunePipeline（兩步驟 LoRA 微調）
+│   ├── trainer.py            # Trainer + TrainerConfig（通用訓練迴圈）
+│   ├── pretrain_pipeline.py  # PretrainPipeline
+│   └── finetune_pipeline.py  # FinetunePipeline（兩步驟微調）
 ├── eval/
-│   └── evaluator.py         # 評估模組（計算 BLEU, ROUGE 分數）
-└── run_pipeline.py          # 統一的 Pipeline 執行入口腳本
+│   └── evaluator.py          # Evaluator（評分模組）
+├── scripts/
+│   ├── train_pretrain.bat    # 一鍵預訓練
+│   ├── train_multiview.bat   # 一鍵兩步驟微調
+│   └── eval_multiview.bat    # 一鍵評分
+├── train_pretrain.py         # 預訓練入口（standalone）
+├── train_multiview.py        # 微調入口（standalone）
+├── eval_multiview.py         # 評分入口（standalone）
+├── run_pipeline.py           # 完整 pipeline 一鍵入口
+├── config.py                 # argparse 設定
+└── metrics.py                # WER / BLEU / ROUGE 計算
 ```
-
-### 核心組件說明
-
-- **`EEGDataPipeline`**: 負責資料集載入、受試者篩選與 BART 分詞（Tokenization）。內建快取機制，能顯著提升重複實驗的效率。
-- **`BaseEEGModel`**: 抽象介面，確保任何新模型都提供必要的屬性（`eeg_encoder`, `global_transformer`, `language_model`）以及用於 LoRA/微調設定的 `get_tuning_targets()`。
-- **`Trainer`**: 統一的訓練引擎，支援早停（Early Stopping）、權重存檔（Checkpointing）與梯度累積。
-- **`Evaluator`**: 解耦的評估邏輯，可獨立於訓練流程之外執行。
 
 ---
 
-## 🚀 快速開始
+## 模型架構
 
-`run_pipeline.py` 是執行訓練與評估的唯一入口。
+### MultiViewConformerTranslator
 
-### 1. 執行完整 Pipeline
-依序執行預訓練、兩階段微調以及最終評估。
-```bash
-python run_pipeline.py --task task1_task2_taskNRv2 --cuda cuda:0 --no_early_stop
+```
+原始 EEG (105 ch × 5000 tp)
+        │
+        ▼ split_raw_eeg_by_region()
+┌──────────────────────────────┐
+│  10 個腦區 RegionalEncoder   │  各自獨立處理
+│  prefrontal (26ch)           │
+│  premotor   (16ch)           │
+│  brocas     ( 4ch)           │
+│  ...                         │
+└──────────────────────────────┘
+        │  每區輸出 (B, 100, 512)
+        ▼ concat
+  (B, 1000, 512)  — 10 區 × 100 tokens
+        │
+        ▼ GlobalTransformer (2 層)
+  (B, 1000, 512)
+        │
+        ▼ fc1 + ReLU
+  (B, 1000, 1024)   ← BART embedding size
+        │
+        ▼ BART decoder (inputs_embeds)
+  生成文字
 ```
 
-### 2. 恢復微調（從 Step 2 開始）
-跳過預訓練，直接從特定的權重存檔繼續 Step 2 訓練。
-```bash
-python run_pipeline.py --skip_pretrain --resume_step2 ./checkpoints/pipeline/finetune/last/multiview_s2.pt
+### RegionalConformerEncoder（每個腦區）
+
+```
+Input: (B, C_region, 5000)
+  → temporal_conv  Conv2d(1→40, k=(1,25))  + BN
+  → spatial_conv   Conv2d(40→40, k=(C,1))  + BN + ELU
+  → AvgPool2d(stride=10)  →  (B, 40, 500)
+  → Dropout(0.3)
+  → AdaptiveAvgPool1d(100)  →  (B, 40, 100)
+  → projection Linear(40→512)
+  → PositionalEncoding
+  → TransformerEncoder(2 層, d_model=512, nhead=8)
+Output: (B, 100, 512)
 ```
 
-### 3. 僅執行評估
-對已存檔的模型進行評分。
+### 腦區對應（BRAIN_REGION_CHANNEL_COUNT）
+
+| 腦區 | 通道數 |
+|------|--------|
+| prefrontal | 26 |
+| premotor | 16 |
+| primary_sensory | 11 |
+| visual | 11 |
+| somatic_sensory | 9 |
+| auditory_assoc | 9 |
+| primary_motor | 9 |
+| wernickes | 6 |
+| brocas | 4 |
+| auditory | 4 |
+
+---
+
+## 訓練策略
+
+### Step 1：Encoder Warm-up（BART 凍結）
+
+- 凍結所有 BART 參數
+- 只訓練：`view_encoders` + `global_transformer` + `fc1`
+- LR = 5e-5，AdamW weight_decay=0.05
+- Cosine schedule + 10% warmup
+- 25 epochs（預設）
+
+### Step 2：LoRA Fine-tune
+
+- 對 BART 套用 LoRA（r=16, alpha=32, dropout=0.15）
+- Target modules：`q_proj`, `k_proj`, `v_proj`, `out_proj`
+- 3 個 param group：
+
+| Group | LR | 說明 |
+|-------|----|------|
+| enc_p2（EEG 側） | LR2 = 5e-6 | encoder 穩定微調 |
+| lora_p2（LoRA adapter） | LR2 × 2.0 = 1e-5 | **必須高於 encoder**，讓 BART 快速適配 EEG 輸入 |
+| other_p2 | LR2 × 0.5 = 2.5e-6 | 其他參數 |
+
+- 35 epochs（預設）
+- 結束後 `merge_and_unload()` 合併 LoRA 權重，存為 `_merged.pt`
+
+### EEG Data Augmentation（訓練時）
+
+每個 batch 在 GPU 上即時套用，驗證集不套用：
+
+| 增強方式 | 機率 | 參數 |
+|----------|------|------|
+| 振幅縮放 | 70% | uniform(0.80, 1.20) |
+| 高斯噪聲 | 50% | σ = 0.03 |
+| 時間位移 | 50% | ±5% of T（circular roll） |
+
+---
+
+## 超參數一覽（目前最佳設定）
+
+| 參數 | 值 | 說明 |
+|------|-----|------|
+| `n_encoder_layers` | 2 | 每腦區 Transformer 層數（原 4，過擬合） |
+| `n_global_layers` | 2 | Global Transformer 層數（原 3） |
+| `dropout` | 0.3 | 全局 dropout（原 0.1，過低） |
+| `lora_r` | 16 | LoRA rank（r=32 參數過多） |
+| `lora_alpha` | 32 | = r × 2 |
+| `lora_dropout` | 0.15 | LoRA 內部 dropout |
+| `lora_targets` | q/k/v/out_proj | 覆蓋所有 attention projection |
+| `weight_decay` | 0.05 | L2 正則（原 0.01） |
+| `label_smooth` | 0.1 | 交叉熵 label smoothing |
+| `batch_size` | 4 | GPU 記憶體限制 |
+| `grad_accum_steps` | 2 | 等效 batch = 8 |
+| `mask_ratio`（pretrain） | 0.30 | 遮蔽比（原 0.15，太低） |
+
+---
+
+## 快速開始
+
+### 環境需求
+
+```bash
+pip install torch transformers peft tqdm nltk torchmetrics
+python -c "import nltk; nltk.download('punkt_tab')"
+```
+
+### 1. 資料預處理
+
+ZuCo 資料集需先從 `.mat` 轉 `.pickle`：
+
+```bash
+python util/construct_dataset_mat_to_pickle_v1.py
+```
+
+預期目錄結構：
+```
+dataset/ZuCo/
+├── task1-SR/pickle/task1-SR-dataset.pickle
+├── task2-NR/pickle/task2-NR-dataset.pickle
+├── task3-TSR/pickle/task3-TSR-dataset.pickle
+└── task2-NR-2.0/pickle/task2-NR-2.0-dataset.pickle
+```
+
+### 2. 預訓練（Conformer Encoder）
+
+```bash
+scripts\train_pretrain.bat
+# 或直接執行：
+python train_pretrain.py -b 4 -ne 50 -lr 5e-5 --mask_ratio 0.30 --dropout 0.2 --n_transformer_layers 2 -s ./checkpoints/pretrain -cuda cuda:0
+```
+
+輸出：
+- `checkpoints/pretrain/pretrain_best.pt`（完整模型）
+- `checkpoints/pretrain/encoder_best.pt`（只有 encoder，供 fine-tune 載入）
+
+### 3. 兩步驟微調
+
+```bash
+scripts\train_multiview.bat
+# 或直接執行：
+python train_multiview.py \
+    -m MultiViewConformerTranslator \
+    -t task1_task2_taskNRv2 \
+    -2step -pre \
+    -ne1 25 -ne2 35 \
+    -lr1 5e-5 -lr2 5e-6 \
+    -b 4 \
+    --no_early_stop \
+    --lora_r 16 \
+    --label_smooth 0.1 \
+    -s ./checkpoints/multiview \
+    -cuda cuda:0
+```
+
+輸出（在 `checkpoints/multiview/`）：
+- `best/{name}_s1.pt` — Step 1 最佳權重
+- `best/{name}.pt`    — Step 2 最佳權重
+- `best/{name}_merged.pt` — LoRA 合併後的最終推論用權重
+
+### 4. 評分
+
+```bash
+scripts\eval_multiview.bat
+```
+
+評分 4 個條件（teacher forcing / free generation × real EEG / noise）：
+
+```bash
+python eval_multiview.py \
+    -checkpoint ./checkpoints/multiview/best/{name}_merged.pt \
+    -conf ./config/decoding/{name}.json \
+    -tf True -n False -cuda cuda:0
+```
+
+輸出：
+- `results/{task}_results.txt` — 預測 vs. 答案
+- `results/{task}_metrics.json` — WER / BLEU-1~4 / ROUGE
+
+### 5. 完整 Pipeline（一鍵）
+
+```bash
+python run_pipeline.py \
+    --task task1_task2_taskNRv2 \
+    --cuda cuda:0 \
+    --no_early_stop \
+    --checkpoint_dir ./checkpoints/pipeline
+```
+
+跳過 pretrain：
+```bash
+python run_pipeline.py --skip_pretrain --pretrained_encoder ./checkpoints/pretrain/encoder_best.pt
+```
+
+從 Step 2 斷點繼續：
+```bash
+python run_pipeline.py --skip_pretrain --resume_step2 ./checkpoints/multiview/last/model_s2.pt
+```
+
+只評分：
 ```bash
 python run_pipeline.py --eval_only --eval_ckpt ./checkpoints/multiview/best/model_merged.pt
 ```
 
 ---
 
-## 🛠️ 模型介面說明
+## 模組化 API
 
-若要更換模型，只需實作 `BaseEEGModel` 並更新 `run_pipeline.py` 中的 `build_model()` 函數即可。
+### DataPipeline
 
-**`BaseEEGModel` 必備屬性：**
-- `model.eeg_encoder` → 腦區編碼器的 `ModuleDict`。
-- `model.global_transformer` → 全局注意力層。
-- `model.language_model` → 語言模型主體（如 BART）。
-- `model.get_tuning_targets()` → 回傳參數組字典（如 'encoder', 'lm'），方便設定 LoRA。
+```python
+from data.pipeline import EEGDataPipeline
 
----
+pipeline = EEGDataPipeline(
+    task_name='task1_task2_taskNRv2',
+    subject='ALL',
+    eeg_type='GD',
+    batch_size=4,
+)
+loaders = pipeline.build()          # {'train': ..., 'dev': ..., 'test': ...}
 
-## 📊 技術細節
-
-### 腦區映射（Channel-to-Region Mapping）
-基於 EGI HydroCel 128 系統，我們在移除 23 個外圈電極後，將剩下的 **105 個通道** 映射至 **10 個腦區**（左右大腦的額葉、顳葉、頂葉、枕葉）。詳見 `data/channel_mapping.py`。
-
-### 多視角策略（Multi-View Strategy）
-- **時空壓縮**：每個腦區編碼器使用 Conformer 區塊，透過 `pool_stride=10` 與 `AdaptiveAvgPool1d(100)` 為每個區域生成 100 個 Token。
-- **拼接與全局注意力**：10 個視角 × 100 Token = 1000 Token，經由全局 Transformer 處理後輸入至 BART。
-- **3/7 凍結策略**：微調期間，每輪隨機僅解凍 3 個腦區編碼器，其餘 7 個保持凍結，這是一種針對「視角」的正規化（Regularization）手段。
-
-### 超參數設定
-| 參數 | 預訓練 (Pre-Training) | 微調 (Fine-Tuning) |
-|---|---|---|
-| Batch Size | 4 | 4 |
-| 學習率 (LR) | 5e-5 | 5e-5 (S1) / 5e-6 (S2) |
-| 訓練輪數 (Epochs) | 50 | 20 (S1) + 30 (S2) |
-| 優化器 | AdamW | AdamW |
-| 排程器 | CosineAnnealing | CosineAnnealing |
-
----
-
-## 📥 設定與預處理
-
-### 1. 下載資料
-下載 ZuCo 資料集並放置於 `dataset/ZuCo/` 目錄下：
-- [ZuCo v1.0](https://osf.io/q3zws/files/)
-- [ZuCo v2.0](https://osf.io/2urht/files/)
-
-### 2. 環境設定
-```bash
-conda env create -f environment.yml
-conda activate eeg2text
-pip install -r requirements.txt
+# 快取到磁碟（加速下次載入）
+pipeline.save_cache('./cache/zuco.pkl')
+pipeline2 = EEGDataPipeline.load_cache('./cache/zuco.pkl', batch_size=4)
 ```
 
-### 3. 資料預處理
-將 `.mat` 檔案轉換為包含原始 EEG 數據的 `.pickle` 格式：
-```bash
-scripts/prepare_dataset.sh  # Windows 請執行 .bat
+### 模型介面（BaseEEGModel）
+
+所有模型均實作以下介面，可直接替換：
+
+```python
+model.eeg_encoder          # view_encoders ModuleDict（各腦區編碼器）
+model.global_transformer   # 全局 Transformer
+model.language_model       # BART (BartForConditionalGeneration)
+
+model.freeze_language_model()    # 凍結 BART（Step 1 用）
+model.unfreeze_language_model()  # 解凍 BART
+model.get_encoder_params()       # EEG 側全部參數
+model.get_lm_params()            # LM 全部參數
+model.get_tuning_targets()       # → {'encoder': [...], 'lm': [...]}
+
+model.encode(view_inputs)        # EEG → (B, 1000, 1024) encoder hidden states
+model.forward(view_inputs, masks, masks_inv, target_ids)   # 訓練用
+model.generate(view_inputs, masks, masks_inv, **gen_kwargs) # 推論用
+```
+
+### 替換模型
+
+只需實作 `BaseEEGModel` 的抽象方法，即可直接接入所有訓練/評分流程：
+
+```python
+from models.base import BaseEEGModel
+
+class MyNewModel(BaseEEGModel):
+    @property
+    def eeg_encoder(self): return self.my_encoder
+    @property
+    def global_transformer(self): return self.my_global_tf
+    @property
+    def language_model(self): return self.pretrained
+    def get_tuning_targets(self): ...
+    def encode(self, inputs, ...): ...
+    def forward(self, inputs, ...): ...
+    def generate(self, inputs, ...): ...
+
+# 接入 FinetunePipeline
+from training.finetune_pipeline import FinetunePipeline, FinetuneConfig
+pipeline = FinetunePipeline(MyNewModel(...), loaders, tokenizer, FinetuneConfig(), device)
+pipeline.run()
+```
+
+### Trainer（單獨使用）
+
+```python
+from training.trainer import Trainer, TrainerConfig
+
+cfg = TrainerConfig(
+    num_epochs=30,
+    patience=10,
+    no_early_stop=False,
+    label_smooth=0.1,
+    checkpoint_dir='./checkpoints/custom',
+    checkpoint_name='my_model',
+    resume_from='./checkpoints/custom/last/my_model.pt',  # 從斷點繼續
+    save_every=5,  # 每 5 epoch 額外存一份
+)
+trainer = Trainer(model, dataloaders, optimizer, scheduler, tokenizer, cfg, device)
+best_model = trainer.train()
+```
+
+### Evaluator（獨立評分）
+
+```python
+from eval.evaluator import Evaluator
+
+# 從 checkpoint 載入
+ev = Evaluator.from_checkpoint(
+    './checkpoints/multiview/best/model_merged.pt',
+    model_class=MultiViewConformerTranslator,
+    model_kwargs={'pretrained_bart': bart, ...},
+    tokenizer=tokenizer,
+    device=device,
+)
+
+# 評分單一條件
+metrics = ev.evaluate(test_loader, teacher_forcing=False, use_noise=False)
+print(metrics)  # {'bleu-4': ..., 'rouge1_fmeasure': ..., 'wer': ..., ...}
+
+# 評分全部 4 條件
+all_results = ev.evaluate_all(test_loader)
+ev.save_results(all_results, './results/eval.json')
 ```
 
 ---
 
-## 📝 舊版腳本支持
-原有的腳本（如 `train_multiview.py`, `eval_multiview.py` 等）仍保留在根目錄下且功能完整，可用於不適用統一 Pipeline 的特定實驗。
+## 已知問題與修復記錄
 
-## 🔗 參考文獻
-- Wang, Z. and Ji, H. (2021). *Open vocabulary EEG-to-text decoding and zero-shot sentiment classification.*
-- Liu, H. et al. (2024). *EEG2TEXT: Open vocabulary EEG-to-text decoding with EEG pre-training and multi-view transformer.*
-- Song, Y. et al. (2022). *EEG Conformer: Convolutional transformer for EEG decoding and visualization.*
+### [2026-04-19] 過擬合問題系統性修正
+
+**問題**：Free generation BLEU-4 = 0.0000，Teacher forcing BLEU-4 = 0.0287（論文目標 0.121）
+
+**根本原因**（按嚴重程度）：
+
+1. **LoRA LR 設定錯誤（致命）**
+   - `lora_p2` LR = `LR2 × 0.1 = 5e-7`，LoRA adapter 幾乎無法更新
+   - **修正**：改為 `LR2 × 2.0 = 1e-5`
+
+2. **模型容量過大**
+   - `n_encoder_layers=4, n_global_layers=3` → 43 Transformer 層，11K 樣本養不起
+   - **修正**：`n_encoder_layers=2, n_global_layers=2`
+
+3. **Dropout 不足**
+   - 全局 `dropout=0.1` 對 416M 參數模型嚴重不足
+   - **修正**：`dropout=0.3`，LoRA dropout: 0.1 → 0.15
+
+4. **Fine-tune 無 EEG 資料增強**
+   - 模型直接記憶訓練集 EEG 波形
+   - **修正**：加入振幅縮放 + 高斯噪聲 + 時間位移（`augment_eeg_views()`）
+
+5. **Weight decay 過低**
+   - `weight_decay=0.01` → **修正**：`0.05`
+
+6. **LoRA rank 過高**
+   - `r=32` 對 11K 樣本而言參數過多 → **修正**：`r=16`
+
+7. **Pretrain mask ratio 過低**
+   - `mask_ratio=0.15` → encoder 表示不夠 robust → **修正**：`0.30`
+
+---
+
+### [2026-04-18] Free generation 完全失效
+
+**問題**：生成參數 `repetition_penalty=5.0` 導致任何 4-gram 都無法形成，BLEU-4 = 0.0000
+
+**修正**（`eval_multiview.py`）：
+- `repetition_penalty`: 5.0 → 1.5
+- `max_length` → `max_new_tokens=50`
+- 加入 `no_repeat_ngram_size=3`
+- 加入 `forced_bos_token_id`
+
+---
+
+### [2026-04-18] 兩步驟訓練架構
+
+**問題**：原始訓練為單步驟，LoRA 從一開始就套在 BART 上，EEG encoder 還沒學會任何表示就開始與 BART 聯合訓練。
+
+**修正**：重構為兩步驟訓練（符合論文 2405.02165）：
+- Step 1：凍結 BART，專門訓練 EEG encoder（warm-up）
+- Step 2：對 BART 套用 LoRA，全部聯合微調
+
+---
+
+## 評分指標說明
+
+| 指標 | 說明 | 論文目標（free gen） |
+|------|------|---------------------|
+| BLEU-4 | 4-gram 精確匹配 | **0.121** |
+| BLEU-1 | 1-gram 精確匹配 | ~0.40 |
+| ROUGE-1 F1 | Unigram 重疊 | ~0.35 |
+| WER | 詞錯誤率（越低越好） | ~0.70 |
+
+評分以 **free generation + real EEG**（非 teacher forcing）為主要指標。
+Teacher forcing 分數永遠高於 free generation，不代表模型真正學到 EEG→text 映射。
+Noise EEG 與 Real EEG 分數若相近，代表模型**沒有利用 EEG 訊號**。
+
+---
+
+## 參考論文
+
+- 主要論文：[Multi-View EEG-to-Text, arxiv 2405.02165](https://arxiv.org/abs/2405.02165)
+- ZuCo 資料集：Hollenstein et al., 2018/2020
+- BART：[Lewis et al., 2019](https://arxiv.org/abs/1910.13461)
+- LoRA：[Hu et al., 2021](https://arxiv.org/abs/2106.09685)
+- Conformer（EEG）：EEGNet-based spatial-temporal filtering
