@@ -31,7 +31,16 @@ def get_config(case):
         parser.add_argument('-lr1', '--learning_rate_step1', type = float, help='learning_rate_step1', default = 0.00005, required=True)
         parser.add_argument('-lr2', '--learning_rate_step2', type = float, help='learning_rate_step2', default = 0.0000005, required=True)
         parser.add_argument('-b', '--batch_size', type = int, help='batch_size', default = 32, required=True)
-        
+
+        parser.add_argument('-patience', '--patience', type=int, help='early stopping patience (epochs)', default=10)
+        parser.add_argument('-no_early_stop', '--no_early_stop', action='store_true', help='disable early stopping')
+        parser.add_argument('-lora_r', '--lora_r', type=int, help='LoRA rank', default=16)
+        parser.add_argument('-lora_targets', '--lora_targets', nargs='+',
+                            help='LoRA target modules',
+                            default=['q_proj', 'k_proj', 'v_proj', 'out_proj'])
+        parser.add_argument('-label_smooth', '--label_smooth', type=float,
+                            help='label smoothing epsilon (0=off)', default=0.1)
+
         parser.add_argument('-s', '--save_path', help='checkpoint save path', default = './checkpoints/decoding', required=True)
         parser.add_argument('-subj', '--subjects', help='use all subjects or specify a particular one', default = 'ALL', required=False)
         parser.add_argument('-eeg', '--eeg_type', help='choose from {GD, FFD, TRT}', default = 'GD', required=False)

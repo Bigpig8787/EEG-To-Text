@@ -45,8 +45,11 @@ def eval_model(dataloaders, device, tokenizer, model, teacher_forcing, input_noi
                     predictions = out.logits.softmax(dim=-1).topk(1).indices.squeeze(-1)
                 else:
                     predictions = model.generate(view_inputs, masks_batch, mask_inv_batch,
-                                                 target_ids_batch, max_length=100, num_beams=5,
-                                                 do_sample=False, repetition_penalty=5.0)
+                                                 target_ids_batch, max_new_tokens=50, num_beams=5,
+                                                 do_sample=False, repetition_penalty=1.5,
+                                                 no_repeat_ngram_size=3,
+                                                 forced_bos_token_id=tokenizer.bos_token_id,
+                                                 early_stopping=True)
 
             pred_string = tokenizer.batch_decode(predictions, skip_special_tokens=True)
             pred_list.extend(pred_string)
