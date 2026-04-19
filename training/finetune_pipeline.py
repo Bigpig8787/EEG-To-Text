@@ -34,7 +34,7 @@ class FinetuneConfig:
     no_early_stop: bool = True
     label_smooth: float = 0.1
     max_grad_norm: float = 1.0
-    warmup_ratio: float = 0.1
+    warmup_ratio: float = 0.2
     use_amp: bool = True
     save_every: int = 0
 
@@ -127,7 +127,7 @@ class FinetunePipeline:
         self.model.unfreeze_language_model()
         lora_cfg = LoraConfig(
             task_type=TaskType.SEQ_2_SEQ_LM,
-            r=cfg.lora_r, lora_alpha=cfg.lora_r * 2,
+            r=cfg.lora_r, lora_alpha=cfg.lora_r,
             lora_dropout=cfg.lora_dropout,
             target_modules=cfg.lora_targets,
         )
@@ -149,9 +149,9 @@ class FinetunePipeline:
                 other_p.append(param)
 
         opt = optim.AdamW([
-            {'params': enc_p,   'lr': cfg.lr2},
-            {'params': lora_p,  'lr': cfg.lr2 * 0.1},
-            {'params': other_p, 'lr': cfg.lr2 * 0.5},
+            {'params': enc_p,   'lr': cfg.lr2 * 0.2},
+            {'params': lora_p,  'lr': cfg.lr2 * 3.0},
+            {'params': other_p, 'lr': cfg.lr2 * 0.1},
         ], weight_decay=0.01)
 
         total_steps = (len(self.loaders['train']) // cfg.grad_accum_steps) * cfg.step2_epochs
