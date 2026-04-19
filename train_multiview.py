@@ -189,10 +189,10 @@ if __name__ == '__main__':
 
     GRAD_ACCUM     = 2
     LORA_R         = args.get('lora_r', 16)
-    LORA_ALPHA     = LORA_R * 2
+    LORA_ALPHA     = LORA_R
     LORA_TARGETS   = args.get('lora_targets', ['q_proj', 'k_proj', 'v_proj', 'out_proj'])
     LABEL_SMOOTH   = args.get('label_smooth', 0.1)
-    WARMUP_RATIO   = 0.1
+    WARMUP_RATIO   = 0.2
     PATIENCE       = 9999 if args.get('no_early_stop', False) else args.get('patience', 10)
 
     save_name = f'{TASK_NAME}_multiview_2step_b{BATCH_SIZE}_{STEP1_EPOCHS}_{STEP2_EPOCHS}_{LR1}_{LR2}_unique_sent'
@@ -320,9 +320,9 @@ if __name__ == '__main__':
     # LoRA adapters need LR >= encoder LR to adapt BART effectively.
     # The previous LR2*0.1 was 10× too slow and is the primary cause of poor free-gen scores.
     opt2 = optim.AdamW([
-        {'params': enc_p2,   'lr': LR2},
+        {'params': enc_p2,   'lr': LR2 * 0.2},  # protect warmed-up encoder from drift
         {'params': lora_p2,  'lr': LR2 * 2.0},  # LoRA higher than enc: fast BART adaptation
-        {'params': other_p2, 'lr': LR2 * 0.5},
+        {'params': other_p2, 'lr': LR2 * 0.1},  # keep pre-trained BART weights stable
     ], weight_decay=0.05)
 
     total_s2 = (len(train_loader) // GRAD_ACCUM) * STEP2_EPOCHS
