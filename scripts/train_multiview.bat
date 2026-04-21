@@ -1,7 +1,7 @@
 @echo off
-REM Two-step training (overfitting fixes applied):
-REM   - encoder: 2 layers, dropout 0.3, weight_decay 0.05
-REM   - LoRA r=16, alpha=32, LR = LR2*2.0 (was 0.1 — that was the main bug)
+REM Two-step training (paper-spec hyperparameters):
+REM   - encoder: 4 local / 3 global layers, dropout 0.1, weight_decay 0.05
+REM   - LoRA r=16, alpha=r, LR2=5e-7 (paper spec)
 REM   - EEG augmentation (amplitude scale + noise + time shift) during training
 REM   - label_smooth=0.1, no early stopping, 25+35 epochs
 python train_multiview.py ^
@@ -13,7 +13,7 @@ python train_multiview.py ^
     --num_epoch_step1 25 ^
     --num_epoch_step2 35 ^
     -lr1 0.00005 ^
-    -lr2 0.000005 ^
+    -lr2 0.0000005 ^
     -b 4 ^
     --no_early_stop ^
     --lora_r 16 ^
