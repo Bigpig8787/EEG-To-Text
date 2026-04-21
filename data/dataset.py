@@ -142,15 +142,14 @@ class ZuCo_dataset(Dataset):
 
             total = len(input_dataset_dict[subjects[0]])
             train_div = int(0.8 * total)
-            dev_div = train_div + int(0.1 * total)
 
             if setting == 'unique_sent':
                 if phase == 'train':
                     idx_range = range(train_div)
                 elif phase == 'dev':
-                    idx_range = range(train_div, dev_div)
+                    idx_range = range(train_div, total)
                 elif phase == 'test':
-                    idx_range = range(dev_div, total)
+                    idx_range = range(train_div, total)
             elif setting == 'unique_subj':
                 idx_range = range(total)
                 if phase == 'train':
