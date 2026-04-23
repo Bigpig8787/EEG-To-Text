@@ -87,18 +87,20 @@ def get_input_sample(sent_obj, tokenizer, eeg_type='GD',
 
     while len(word_embeddings) < max_len:
         word_embeddings.append(torch.zeros(105 * len(bands)))
+    # Truncate oversize sentences so torch.stack produces uniform (max_len, D).
+    word_embeddings = word_embeddings[:max_len]
 
     input_sample['input_embeddings'] = torch.stack(word_embeddings)
 
     # attention masks
-    n_words = len(sent_obj['word']) + (1 if add_CLS_token else 0)
+    n_words = min(len(sent_obj['word']) + (1 if add_CLS_token else 0), max_len)
     input_sample['input_attn_mask'] = torch.zeros(max_len)
     input_sample['input_attn_mask'][:n_words] = 1.0
     input_sample['input_attn_mask_invert'] = torch.ones(max_len)
     input_sample['input_attn_mask_invert'][:n_words] = 0.0
 
     input_sample['target_mask'] = target_tokenized['attention_mask'][0]
-    input_sample['seq_len'] = max(len(sent_obj['word']), 1)
+    input_sample['seq_len'] = max(min(len(sent_obj['word']), max_len), 1)
 
     # ---- raw EEG for multi-view model ----
     # Always emit the full 10-region dict so DataLoader.collate can batch;
