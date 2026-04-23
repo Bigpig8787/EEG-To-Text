@@ -7,7 +7,7 @@ import os
 import numpy as np
 import torch
 from torch.utils.data import Dataset
-from data.channel_mapping import split_raw_eeg_by_region
+from data.channel_mapping import split_raw_eeg_by_region, BRAIN_REGION_CHANNEL_COUNT
 
 RAW_EEG_MAX_LEN = 5000  # pad/truncate raw EEG to this length
 
@@ -101,10 +101,12 @@ def get_input_sample(sent_obj, tokenizer, eeg_type='GD',
     input_sample['seq_len'] = max(len(sent_obj['word']), 1)
 
     # ---- raw EEG for multi-view model ----
-    if 'rawData' in sent_obj:
-        raw_eeg = sent_obj['rawData']  # (105, T)
-        raw_eeg = np.nan_to_num(raw_eeg, nan=0.0, posinf=0.0, neginf=0.0)
-
+    # Always emit the full 10-region dict so DataLoader.collate can batch;
+    # zero-fill when rawData is missing so this sample is kept (consistent
+    # with the zero-imputation policy used elsewhere).
+    raw = sent_obj.get('rawData', None)
+    if raw is not None:
+        raw_eeg = np.nan_to_num(raw, nan=0.0, posinf=0.0, neginf=0.0)
         T = raw_eeg.shape[1]
         if T < RAW_EEG_MAX_LEN:
             padded = np.zeros((105, RAW_EEG_MAX_LEN), dtype=np.float32)
@@ -113,17 +115,20 @@ def get_input_sample(sent_obj, tokenizer, eeg_type='GD',
         elif T > RAW_EEG_MAX_LEN:
             raw_eeg = raw_eeg[:, :RAW_EEG_MAX_LEN]
 
-        # z-score per channel
         raw_eeg = raw_eeg.astype(np.float32)
         mean = raw_eeg.mean(axis=1, keepdims=True)
         std = raw_eeg.std(axis=1, keepdims=True)
         std[std == 0] = 1.0
         raw_eeg = (raw_eeg - mean) / std
-
         raw_views = split_raw_eeg_by_region(raw_eeg)
         input_sample['raw_eeg_views'] = {
             region: torch.from_numpy(arr.copy()).float()
             for region, arr in raw_views.items()
+        }
+    else:
+        input_sample['raw_eeg_views'] = {
+            region: torch.zeros(ch_count, RAW_EEG_MAX_LEN, dtype=torch.float32)
+            for region, ch_count in BRAIN_REGION_CHANNEL_COUNT.items()
         }
 
     return input_sample
