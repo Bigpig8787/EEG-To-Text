@@ -36,8 +36,9 @@ class EEGPretrainDataset(Dataset):
                     if sent is None or 'rawData' not in sent:
                         continue
                     raw = sent['rawData']
-                    if np.isnan(raw).any() or raw.shape[1] < 50:
+                    if raw.shape[1] < 50:
                         continue
+                    raw = np.nan_to_num(raw, nan=0.0, posinf=0.0, neginf=0.0)
                     self.samples.append(raw)
 
         print(f'[PretrainDataset] total: {len(self.samples)} (split={split})')

@@ -92,6 +92,8 @@ class FinetunePipeline:
         enc_params = (list(self.model.eeg_encoder.parameters()) +
                       (list(self.model.global_transformer.parameters())
                        if self.model.global_transformer else []) +
+                      ([self.model.view_pos_embed]
+                       if hasattr(self.model, 'view_pos_embed') else []) +
                       list(self.model.fc1.parameters()))
 
         opt = optim.AdamW(enc_params, lr=cfg.lr1, weight_decay=0.01)
@@ -141,7 +143,8 @@ class FinetunePipeline:
             if not param.requires_grad:
                 continue
             if any(k in name for k in ('view_encoders', 'global_transformer', 'fc1',
-                                        '_global_transformer', 'eeg_encoder')):
+                                        '_global_transformer', 'eeg_encoder',
+                                        'view_pos_embed')):
                 enc_p.append(param)
             elif 'lora' in name.lower():
                 lora_p.append(param)

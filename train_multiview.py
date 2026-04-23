@@ -275,6 +275,7 @@ if __name__ == '__main__':
 
     enc_params = (list(model.view_encoders.parameters()) +
                   list(model.global_transformer.parameters()) +
+                  [model.view_pos_embed] +
                   list(model.fc1.parameters()))
     total_s1 = (len(train_loader) // GRAD_ACCUM) * STEP1_EPOCHS
     warm_s1  = int(total_s1 * WARMUP_RATIO)
@@ -310,7 +311,8 @@ if __name__ == '__main__':
     for name, param in model.named_parameters():
         if not param.requires_grad:
             continue
-        if 'view_encoders' in name or 'global_transformer' in name or 'fc1' in name:
+        if ('view_encoders' in name or 'global_transformer' in name
+                or 'fc1' in name or 'view_pos_embed' in name):
             enc_p2.append(param)
         elif 'lora' in name.lower():
             lora_p2.append(param)

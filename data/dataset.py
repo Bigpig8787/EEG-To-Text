@@ -25,20 +25,33 @@ def get_input_sample(sent_obj, tokenizer, eeg_type='GD',
                      max_len=56, add_CLS_token=False):
 
     def get_word_embedding_eeg_tensor(word_obj, eeg_type, bands):
+        expected = 105 * len(bands)
         frequency_features = []
         for band in bands:
-            frequency_features.append(word_obj['word_level_EEG'][eeg_type][eeg_type+band])
+            try:
+                feat = word_obj['word_level_EEG'][eeg_type][eeg_type+band]
+            except (KeyError, TypeError):
+                feat = np.zeros(105, dtype=np.float32)
+            frequency_features.append(feat)
         word_eeg_embedding = np.concatenate(frequency_features)
-        if len(word_eeg_embedding) != 105 * len(bands):
-            return None
+        if len(word_eeg_embedding) != expected:
+            word_eeg_embedding = np.zeros(expected, dtype=np.float32)
+        word_eeg_embedding = np.nan_to_num(word_eeg_embedding, nan=0.0, posinf=0.0, neginf=0.0)
         return normalize_1d(torch.from_numpy(word_eeg_embedding))
 
     def get_sent_eeg(sent_obj, bands):
+        expected = 105 * len(bands)
         sent_eeg_features = []
         for band in bands:
-            sent_eeg_features.append(sent_obj['sentence_level_EEG']['mean' + band])
+            try:
+                feat = sent_obj['sentence_level_EEG']['mean' + band]
+            except (KeyError, TypeError):
+                feat = np.zeros(105, dtype=np.float32)
+            sent_eeg_features.append(feat)
         sent_eeg_embedding = np.concatenate(sent_eeg_features)
-        assert len(sent_eeg_embedding) == 105 * len(bands)
+        if len(sent_eeg_embedding) != expected:
+            sent_eeg_embedding = np.zeros(expected, dtype=np.float32)
+        sent_eeg_embedding = np.nan_to_num(sent_eeg_embedding, nan=0.0, posinf=0.0, neginf=0.0)
         return normalize_1d(torch.from_numpy(sent_eeg_embedding))
 
     if sent_obj is None:
@@ -54,8 +67,7 @@ def get_input_sample(sent_obj, tokenizer, eeg_type='GD',
 
     # sentence-level EEG features (frequency bands)
     sent_level_eeg_tensor = get_sent_eeg(sent_obj, bands)
-    if torch.isnan(sent_level_eeg_tensor).any():
-        return None
+    sent_level_eeg_tensor = torch.nan_to_num(sent_level_eeg_tensor, nan=0.0, posinf=0.0, neginf=0.0)
     input_sample['sent_level_EEG'] = sent_level_eeg_tensor
 
     # sentiment label (dummy)
@@ -69,9 +81,8 @@ def get_input_sample(sent_obj, tokenizer, eeg_type='GD',
     for word in sent_obj['word']:
         wt = get_word_embedding_eeg_tensor(word, eeg_type, bands=bands)
         if wt is None:
-            return None
-        if torch.isnan(wt).any():
-            return None
+            wt = torch.zeros(105 * len(bands))
+        wt = torch.nan_to_num(wt, nan=0.0, posinf=0.0, neginf=0.0)
         word_embeddings.append(wt)
 
     while len(word_embeddings) < max_len:
@@ -87,16 +98,12 @@ def get_input_sample(sent_obj, tokenizer, eeg_type='GD',
     input_sample['input_attn_mask_invert'][:n_words] = 0.0
 
     input_sample['target_mask'] = target_tokenized['attention_mask'][0]
-    input_sample['seq_len'] = len(sent_obj['word'])
-
-    if input_sample['seq_len'] == 0:
-        return None
+    input_sample['seq_len'] = max(len(sent_obj['word']), 1)
 
     # ---- raw EEG for multi-view model ----
     if 'rawData' in sent_obj:
         raw_eeg = sent_obj['rawData']  # (105, T)
-        if np.isnan(raw_eeg).any():
-            return None
+        raw_eeg = np.nan_to_num(raw_eeg, nan=0.0, posinf=0.0, neginf=0.0)
 
         T = raw_eeg.shape[1]
         if T < RAW_EEG_MAX_LEN:
