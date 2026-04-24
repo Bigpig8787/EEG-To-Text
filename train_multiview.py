@@ -76,6 +76,21 @@ def count_params(model):
     return total, trainable
 
 
+_LOG_PATH = 'train.log'
+
+
+def log(msg=''):
+    """Print to stdout AND append to train.log. Used for important events
+    (epoch/loss/step headers/save notifications) so the log stays clean
+    even when tqdm progress bars spam stdout."""
+    print(msg)
+    try:
+        with open(_LOG_PATH, 'a', encoding='utf-8') as f:
+            f.write(str(msg) + '\n')
+    except Exception:
+        pass
+
+
 def train_model(dataloaders, device, model, tokenizer, optimizer, scheduler, scaler,
                 num_epochs=30, grad_accum_steps=2, patience=10, label_smooth=0.0,
                 checkpoint_path_best='./checkpoints/best/temp.pt',
@@ -89,8 +104,8 @@ def train_model(dataloaders, device, model, tokenizer, optimizer, scheduler, sca
     patience_counter = 0
 
     for epoch in range(num_epochs):
-        print(f'Epoch {epoch}/{num_epochs - 1}')
-        print('-' * 40)
+        log(f'Epoch {epoch}/{num_epochs - 1}')
+        log('-' * 40)
 
         for phase in ['train', 'dev']:
             model.train() if phase == 'train' else model.eval()
@@ -146,27 +161,27 @@ def train_model(dataloaders, device, model, tokenizer, optimizer, scheduler, sca
 
             epoch_loss = running_loss / max(n_samples, 1)
             lr_now = optimizer.param_groups[0]['lr']
-            print(f'{phase} Loss: {epoch_loss:.4f} | lr: {lr_now:.2e}')
+            log(f'{phase} Loss: {epoch_loss:.4f} | lr: {lr_now:.2e}')
 
             if phase == 'dev':
                 if epoch_loss < best_loss:
                     best_loss = epoch_loss
                     best_wts = copy.deepcopy(model.state_dict())
                     torch.save(model.state_dict(), checkpoint_path_best)
-                    print(f'  → saved best (val_loss={epoch_loss:.4f})')
+                    log(f'  → saved best (val_loss={epoch_loss:.4f})')
                     patience_counter = 0
                 else:
                     patience_counter += 1
-                    print(f'  no improvement ({patience_counter}/{patience})')
+                    log(f'  no improvement ({patience_counter}/{patience})')
 
         if patience_counter >= patience:
-            print(f'\nEarly stopping at epoch {epoch}')
+            log(f'\nEarly stopping at epoch {epoch}')
             break
         print()
 
     elapsed = time.time() - since
-    print(f'\nTraining complete in {elapsed // 60:.0f}m {elapsed % 60:.0f}s')
-    print(f'Best val loss: {best_loss:.4f}')
+    log(f'\nTraining complete in {elapsed // 60:.0f}m {elapsed % 60:.0f}s')
+    log(f'Best val loss: {best_loss:.4f}')
     torch.save(model.state_dict(), checkpoint_path_last)
     model.load_state_dict(best_wts)
     return model
@@ -174,6 +189,10 @@ def train_model(dataloaders, device, model, tokenizer, optimizer, scheduler, sca
 
 if __name__ == '__main__':
     args = get_config('train_decoding')
+
+    with open(_LOG_PATH, 'w', encoding='utf-8') as _f:
+        _f.write(f'=== train_multiview.py run @ {time.strftime("%Y-%m-%d %H:%M:%S")} ===\n')
+    log(f'[INFO] Logging important events to {_LOG_PATH}')
 
     # ── hyper-params ────────────────────────────────────────────────
     STEP1_EPOCHS   = args['num_epoch_step1']   # freeze BART, warm up encoders
@@ -266,9 +285,9 @@ if __name__ == '__main__':
     # ════════════════════════════════════════════════════════════════
     # STEP 1: freeze BART, warm up EEG encoders at high LR
     # ════════════════════════════════════════════════════════════════
-    print('\n' + '=' * 60)
-    print(f'STEP 1 — encoder warm-up ({STEP1_EPOCHS} epochs, lr={LR1})')
-    print('=' * 60)
+    log('\n' + '=' * 60)
+    log(f'STEP 1 — encoder warm-up ({STEP1_EPOCHS} epochs, lr={LR1})')
+    log('=' * 60)
 
     for p in model.pretrained.parameters():
         p.requires_grad = False
@@ -294,9 +313,9 @@ if __name__ == '__main__':
     # ════════════════════════════════════════════════════════════════
     # STEP 2: apply LoRA, fine-tune all at low LR
     # ════════════════════════════════════════════════════════════════
-    print('\n' + '=' * 60)
-    print(f'STEP 2 — LoRA fine-tune ({STEP2_EPOCHS} epochs, enc lr={LR2})')
-    print('=' * 60)
+    log('\n' + '=' * 60)
+    log(f'STEP 2 — LoRA fine-tune ({STEP2_EPOCHS} epochs, enc lr={LR2})')
+    log('=' * 60)
 
     lora_cfg = LoraConfig(
         task_type=TaskType.SEQ_2_SEQ_LM,
@@ -344,8 +363,8 @@ if __name__ == '__main__':
     # ════════════════════════════════════════════════════════════════
     # Merge LoRA → save plain checkpoint (compatible with eval_multiview.py)
     # ════════════════════════════════════════════════════════════════
-    print('\n[INFO] Merging LoRA weights into BART...')
+    log('\n[INFO] Merging LoRA weights into BART...')
     model.pretrained = model.pretrained.merge_and_unload()
     merged_path = ckpt_best.replace('.pt', '_merged.pt')
     torch.save(model.state_dict(), merged_path)
-    print(f'[INFO] Merged checkpoint saved: {merged_path}')
+    log(f'[INFO] Merged checkpoint saved: {merged_path}')
