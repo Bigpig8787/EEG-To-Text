@@ -23,7 +23,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.cuda.amp import GradScaler, autocast
 from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 from transformers import (BartConfig, BartForConditionalGeneration,
@@ -54,6 +53,11 @@ def get_args():
     p.add_argument('-cuda', default='cuda:0')
     p.add_argument('--unfreeze_bart', action='store_true',
                    help='also train BART params (default: BART frozen, encoder only)')
+    p.add_argument('--no_pretrained_encoder', action='store_true',
+                   help='skip loading checkpoints/pretrain/encoder_best.pt')
+    p.add_argument('--clip', type=float, default=0.0,
+                   help='grad clip max-norm (0 = disabled). default off so overfit '
+                        'is not throttled by clipping.')
     p.add_argument('-s', '--save_path', default='./checkpoints/overfit')
     return vars(p.parse_args())
 
@@ -142,7 +146,9 @@ def main():
     )
 
     encoder_path = os.path.join(PROJECT_ROOT, 'checkpoints', 'pretrain', 'encoder_best.pt')
-    if os.path.exists(encoder_path):
+    if args['no_pretrained_encoder']:
+        log('[INFO] --no_pretrained_encoder set; training encoder from scratch')
+    elif os.path.exists(encoder_path):
         model.load_pretrained_encoder(encoder_path)
         log(f'[INFO] loaded pretrained encoder: {encoder_path}')
     else:
@@ -160,7 +166,6 @@ def main():
     log(f'[INFO] trainable params: {sum(p.numel() for p in trainable):,}')
 
     optimizer = optim.AdamW(trainable, lr=args['learning_rate'], weight_decay=0.0)
-    scaler = GradScaler()
 
     os.makedirs(args['save_path'], exist_ok=True)
 
@@ -176,18 +181,27 @@ def main():
         model.train()
         optimizer.zero_grad()
 
-        with autocast():
-            output = model(raw_views_d, masks_d, mask_inv_d, target_ids_d)
-            loss = output.loss
+        # Run in fp32 (no autocast/GradScaler): single-batch overfit doesn't
+        # need fp16 speed and AMP makes the loss numerically unstable.
+        output = model(raw_views_d, masks_d, mask_inv_d, target_ids_d)
+        loss = output.loss
+        loss.backward()
 
-        scaler.scale(loss).backward()
-        scaler.unscale_(optimizer)
-        nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-        scaler.step(optimizer)
-        scaler.update()
+        # Compute grad norm BEFORE clipping so we can see if grads are flowing.
+        total_norm = 0.0
+        for p in trainable:
+            if p.grad is not None:
+                total_norm += p.grad.data.float().norm(2).item() ** 2
+        total_norm = total_norm ** 0.5
+
+        if args['clip'] > 0:
+            nn.utils.clip_grad_norm_(trainable, max_norm=args['clip'])
+
+        optimizer.step()
 
         losses.append(loss.item())
-        log(f'epoch {epoch:3d}/{args["num_epochs"]-1} | loss: {loss.item():.6f}')
+        log(f'epoch {epoch:3d}/{args["num_epochs"]-1} | loss: {loss.item():.6f} '
+            f'| grad_norm: {total_norm:.4f}')
 
     elapsed = time.time() - since
     log(f'\nDone in {elapsed//60:.0f}m {elapsed%60:.0f}s')
