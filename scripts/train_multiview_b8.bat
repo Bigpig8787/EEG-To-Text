@@ -13,7 +13,6 @@ python train_multiview.py ^
     -lr1 0.00005 ^
     -lr2 0.0000005 ^
     -b 8 ^
-    --no_early_stop ^
     --lora_r 16 ^
     --label_smooth 0.1 ^
     -s ./checkpoints/multiview_b8 ^
