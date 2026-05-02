@@ -31,7 +31,7 @@ class ConformerEncoder(nn.Module):
     Output: (batch, T//pool_stride, d_model)
     """
     def __init__(self, n_channels=105, d_model=512, n_filters=40,
-                 temporal_kernel=25, pool_stride=10,
+                 temporal_kernel=200, pool_stride=100,
                  n_heads=8, n_transformer_layers=4, dropout=0.1):
         super().__init__()
         self.n_channels = n_channels

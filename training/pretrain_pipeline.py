@@ -21,8 +21,8 @@ class PretrainConfig:
     patience: int = 10
     d_model: int = 512
     n_filters: int = 40
-    temporal_kernel: int = 25
-    pool_stride: int = 10
+    temporal_kernel: int = 200
+    pool_stride: int = 100
     n_heads: int = 8
     n_transformer_layers: int = 4
     dropout: float = 0.1

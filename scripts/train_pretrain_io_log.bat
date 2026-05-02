@@ -6,10 +6,11 @@ python train_pretrain_io_log.py ^
     -b 4 ^
     -ne 50 ^
     -lr 0.00005 ^
-    --pool_stride 10 ^
+    --temporal_kernel 200 ^
+    --pool_stride 100 ^
     --d_model 512 ^
     --n_transformer_layers 2 ^
     --dropout 0.2 ^
-    --mask_ratio 0.30 ^
+    --mask_ratio 0.15 ^
     -s ./checkpoints/pretrain_io ^
     -cuda cuda:0

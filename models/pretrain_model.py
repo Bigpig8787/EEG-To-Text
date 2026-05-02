@@ -8,7 +8,7 @@ from models.conformer import ConformerEncoder
 
 class ConformerDecoder(nn.Module):
     def __init__(self, n_channels=105, d_model=512, n_filters=40,
-                 pool_stride=10, target_T=5000):
+                 pool_stride=100, target_T=5000):
         super().__init__()
         self.target_T = target_T
         self.projection = nn.Linear(d_model, n_filters)
@@ -32,7 +32,7 @@ class ConformerDecoder(nn.Module):
 
 class ConformerPreTrainModel(nn.Module):
     def __init__(self, n_channels=105, d_model=512, n_filters=40,
-                 temporal_kernel=25, pool_stride=10,
+                 temporal_kernel=200, pool_stride=100,
                  n_heads=8, n_transformer_layers=4,
                  dropout=0.1, target_T=5000):
         super().__init__()

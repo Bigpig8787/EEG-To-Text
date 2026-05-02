@@ -60,8 +60,8 @@ def build_model(device):
     pretrained_bart = BartForConditionalGeneration.from_pretrained('facebook/bart-large')
     return MultiViewConformerTranslator(
         pretrained_bart=pretrained_bart,
-        d_model=512, n_filters=40, temporal_kernel=25, pool_stride=10,
-        tokens_per_view=100, n_heads=8, n_encoder_layers=4, n_global_layers=3,
+        d_model=512, n_filters=40, temporal_kernel=200, pool_stride=100,
+        tokens_per_view=32, n_heads=8, n_encoder_layers=4, n_global_layers=3,
         dropout=0.1, decoder_embedding_size=1024,
     ).to(device)
 
