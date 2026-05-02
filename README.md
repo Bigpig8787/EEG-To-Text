@@ -73,11 +73,11 @@ EEG-To-Text/
 
 ```
 Input: (B, C_region, 5000)
-  → temporal_conv  Conv2d(1→40, k=(1,25))  + BN
+  → temporal_conv  Conv2d(1→40, k=(1,200))  + BN
   → spatial_conv   Conv2d(40→40, k=(C,1))  + BN + ELU
-  → AvgPool2d(stride=10)  →  (B, 40, 500)
+  → AvgPool2d(stride=100)  →  (B, 40, 50)
   → Dropout(0.3)
-  → AdaptiveAvgPool1d(100)  →  (B, 40, 100)
+  → AdaptiveAvgPool1d(32)  →  (B, 40, 32)
   → projection Linear(40→512)
   → PositionalEncoding
   → TransformerEncoder(2 層, d_model=512, nhead=8)
@@ -153,7 +153,10 @@ Output: (B, 100, 512)
 | `label_smooth` | 0.1 | 交叉熵 label smoothing |
 | `batch_size` | 4 | GPU 記憶體限制 |
 | `grad_accum_steps` | 2 | 等效 batch = 8 |
-| `mask_ratio`（pretrain） | 0.30 | 遮蔽比（原 0.15，太低） |
+| `mask_ratio`（pretrain） | 0.15 | 遮蔽比（paper-spec） |
+| `temporal_kernel` | 200 | CNN kernel（paper-spec，原 25） |
+| `pool_stride` | 100 | CNN stride，5000→50 tokens（paper-spec，原 10） |
+| `tokens_per_view` | 32 | AdaptiveAvgPool 後每 view token 數（原 100） |
 
 ---
 
@@ -188,7 +191,7 @@ dataset/ZuCo/
 ```bash
 scripts\train_pretrain.bat
 # 或直接執行：
-python train_pretrain.py -b 4 -ne 50 -lr 5e-5 --mask_ratio 0.30 --dropout 0.2 --n_transformer_layers 2 -s ./checkpoints/pretrain -cuda cuda:0
+python train_pretrain.py -b 4 -ne 50 -lr 5e-5 --temporal_kernel 200 --pool_stride 100 --mask_ratio 0.15 --dropout 0.2 --n_transformer_layers 2 -s ./checkpoints/pretrain -cuda cuda:0
 ```
 
 輸出：
@@ -405,7 +408,7 @@ ev.save_results(all_results, './results/eval.json')
    - `r=32` 對 11K 樣本而言參數過多 → **修正**：`r=16`
 
 7. **Pretrain mask ratio 過低**
-   - `mask_ratio=0.15` → encoder 表示不夠 robust → **修正**：`0.30`
+   - `mask_ratio`：曾調至 `0.30` 試圖增強 robustness，現回到 paper-spec `0.15`
 
 ---
 

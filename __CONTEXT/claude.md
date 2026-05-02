@@ -77,8 +77,8 @@ D:\EEG-BCI\EEG-To-Text\
    10 × RegionalConformerEncoder (pre-trained temporal conv + transformer)
      ├─ temporal conv (pre-trained ✓)
      ├─ spatial conv (random init, different channel counts per region)
-     ├─ AvgPool(stride=10) → ~500 tokens
-     ├─ AdaptiveAvgPool1d(100) → 100 tokens per view
+     ├─ AvgPool(stride=100) → ~50 tokens
+     ├─ AdaptiveAvgPool1d(32) → 32 tokens per view
      └─ transformer (pre-trained ✓)
    concat → (1000, 512)
    → Global Transformer (3 layers)
@@ -92,10 +92,11 @@ prefrontal(26), premotor(16), brocas(4), auditory_assoc(9), primary_motor(9), pr
 
 ### Key Design Parameters
 - `RAW_EEG_MAX_LEN = 5000` (covers 90th percentile of sentence lengths)
-- `pool_stride = 10` (5000 → 500 tokens)
-- `tokens_per_view = 100` (500 → 100 via AdaptiveAvgPool1d)
+- `temporal_kernel = 200`, `pool_stride = 100` (5000 → 50 tokens, paper-spec)
+- `tokens_per_view = 32` (50 → 32 via AdaptiveAvgPool1d)
+- `mask_ratio = 0.15` (paper-spec)
 - `d_model = 512`
-- 10 views × 100 tokens = 1000 tokens (within BART max 1024)
+- 10 views × 32 tokens = 320 tokens (within BART max 1024)
 
 ## Current Status
 
