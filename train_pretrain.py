@@ -90,7 +90,7 @@ def main():
         for batch_eeg, _ in tqdm(train_loader, desc=f'Epoch {epoch}'):
             batch_eeg = batch_eeg.to(device)
             x_masked, mask = create_remask(batch_eeg, args['mask_ratio'])
-            x_recon = model(x_masked)
+            x_recon = model(x_masked, mask)
             mask_exp = mask.expand_as(batch_eeg)
             loss = F.mse_loss(x_recon[mask_exp], batch_eeg[mask_exp]) if mask_exp.any() else F.mse_loss(x_recon, batch_eeg)
             optimizer.zero_grad()
@@ -108,7 +108,7 @@ def main():
             for batch_eeg, _ in val_loader:
                 batch_eeg = batch_eeg.to(device)
                 x_masked, mask = create_remask(batch_eeg, args['mask_ratio'])
-                x_recon = model(x_masked)
+                x_recon = model(x_masked, mask)
                 mask_exp = mask.expand_as(batch_eeg)
                 loss = F.mse_loss(x_recon[mask_exp], batch_eeg[mask_exp]) if mask_exp.any() else F.mse_loss(x_recon, batch_eeg)
                 total_loss += loss.item() * batch_eeg.size(0)

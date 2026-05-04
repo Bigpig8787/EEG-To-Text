@@ -213,8 +213,10 @@ if __name__ == '__main__':
     LABEL_SMOOTH   = args.get('label_smooth', 0.1)
     WARMUP_RATIO   = 0.2
     PATIENCE       = 9999 if args.get('no_early_stop', False) else args.get('patience', 10)
+    RESUME         = args.get('resume')
 
-    save_name = f'{TASK_NAME}_multiview_2step_b{BATCH_SIZE}_{STEP1_EPOCHS}_{STEP2_EPOCHS}_{LR1}_{LR2}_unique_sent'
+    save_suffix = '_cont' if RESUME else ''
+    save_name = f'{TASK_NAME}_multiview_2step_b{BATCH_SIZE}_{STEP1_EPOCHS}_{STEP2_EPOCHS}_{LR1}_{LR2}_unique_sent{save_suffix}'
 
     np.random.seed(312)
     torch.manual_seed(312)
@@ -269,12 +271,27 @@ if __name__ == '__main__':
     )
 
     encoder_path = os.path.join(PROJECT_ROOT, 'checkpoints', 'pretrain', 'encoder_best.pt')
-    if os.path.exists(encoder_path):
+    if RESUME:
+        log(f'[INFO] Resume mode: skipping encoder_best.pt load (merged ckpt already contains encoder)')
+    elif os.path.exists(encoder_path):
         model.load_pretrained_encoder(encoder_path)
     else:
         print(f'[WARN] No pre-trained encoder at {encoder_path}; training from scratch')
 
     model.to(device)
+
+    if RESUME:
+        if not os.path.isfile(RESUME):
+            raise FileNotFoundError(f'--resume checkpoint not found: {RESUME}')
+        log(f'[INFO] Loading resume checkpoint: {RESUME}')
+        sd = torch.load(RESUME, map_location='cpu')
+        missing, unexpected = model.load_state_dict(sd, strict=False)
+        log(f'[INFO] Resume load done. missing={len(missing)} unexpected={len(unexpected)}')
+        if missing:
+            log(f'[INFO] First 5 missing keys: {missing[:5]}')
+        if unexpected:
+            log(f'[INFO] First 5 unexpected keys: {unexpected[:5]}')
+        model.to(device)
     scaler = GradScaler()
 
     os.makedirs(os.path.join(SAVE_PATH, 'best'), exist_ok=True)
@@ -303,7 +320,9 @@ if __name__ == '__main__':
 
     print(f'[INFO] Step-1 trainable params: {sum(p.numel() for p in enc_params):,}')
 
-    if STEP1_EPOCHS > 0:
+    if RESUME:
+        log('[INFO] Resume mode: skipping STEP 1 (encoder warm-up already done in resumed ckpt)')
+    elif STEP1_EPOCHS > 0:
         model = train_model(dataloaders, device, model, tokenizer, opt1, sch1, scaler,
                             num_epochs=STEP1_EPOCHS, grad_accum_steps=GRAD_ACCUM,
                             patience=PATIENCE, label_smooth=LABEL_SMOOTH,

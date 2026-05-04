@@ -47,8 +47,8 @@ class ConformerPreTrainModel(nn.Module):
             pool_stride=pool_stride, target_T=target_T
         )
 
-    def forward(self, x_masked):
-        return self.decoder(self.encoder(x_masked))
+    def forward(self, x_masked, mask=None):
+        return self.decoder(self.encoder(x_masked, mask=mask))
 
 
 def create_remask(x, mask_ratio=0.15):

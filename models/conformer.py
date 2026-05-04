@@ -5,6 +5,7 @@ Shared by pre-training and multi-view models.
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import math
 
 
@@ -60,11 +61,21 @@ class ConformerEncoder(nn.Module):
         )
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_transformer_layers)
 
-    def forward(self, x):
+    def forward(self, x, mask=None):
         x = x.unsqueeze(1)
         x = self.temporal_conv(x)
+        if mask is not None:
+            x = x.masked_fill(mask.unsqueeze(1), 0.0)
         x = self.spatial_conv(x)
+        if mask is not None:
+            x = x.masked_fill(mask.unsqueeze(1), 0.0)
         x = self.pool(x)
+        if mask is not None:
+            pooled_mask = F.max_pool1d(
+                mask.float().squeeze(1),
+                kernel_size=self.pool_stride, stride=self.pool_stride,
+            ).bool().unsqueeze(1).unsqueeze(1)
+            x = x.masked_fill(pooled_mask, 0.0)
         x = self.dropout(x)
         x = x.squeeze(2).permute(0, 2, 1)
         x = self.projection(x)
