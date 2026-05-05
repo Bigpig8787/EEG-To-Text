@@ -41,7 +41,7 @@ class ConformerEncoder(nn.Module):
 
         self.temporal_conv = nn.Sequential(
             nn.Conv2d(1, n_filters, kernel_size=(1, temporal_kernel),
-                      padding=(0, temporal_kernel // 2), bias=False),
+                      padding='same', bias=False),
             nn.BatchNorm2d(n_filters),
         )
         self.spatial_conv = nn.Sequential(
