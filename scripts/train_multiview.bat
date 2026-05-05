@@ -6,7 +6,7 @@ REM   - EEG augmentation (amplitude scale + noise + time shift) during training
 REM   - label_smooth=0.1, NO early stopping, 50+70 epochs
 python train_multiview.py ^
     --model_name MultiViewConformerTranslator ^
-    --task_name task1_task2_taskNRv2 ^
+    --task_name task1_task2_task3_taskNRv2_taskTSRv2 ^
     --two_step ^
     --pretrained ^
     --not_load_step1_checkpoint ^

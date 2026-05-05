@@ -3,6 +3,7 @@
 - 調查或除錯時請利用子代理以節省上下文
 - 重要的決策定期記錄在Markdown文件中
 - 記得如果架構還是使用方法有變都幫我記錄到readme.md裡
+- 每一版重大改動都寫入 verion.md裡
 
 # CLAUDE.md — EEG-To-Text Multi-View Conformer Project
 

@@ -1,6 +1,12 @@
-"""Convert ZuCo v2.0 .mat files to .pickle with rawData extraction."""
+"""Convert ZuCo v2.0 .mat files to .pickle with rawData extraction.
+
+Supports both v2.0 reading tasks:
+  -t task2-NR-2.0   (Normal Reading v2.0,  mat suffix _NR.mat)
+  -t task2-TSR-2.0  (Task-Specific Reading v2.0, mat suffix _TSR.mat)
+"""
 
 import os
+import argparse
 import numpy as np
 import h5py
 import data_loading_helpers_modified as dh
@@ -8,14 +14,26 @@ from tqdm import tqdm
 import pickle
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-rootdir = os.path.join(PROJECT_ROOT, "dataset", "ZuCo", "task2-NR-2.0", "Matlab files")
 
-print(f'Processing ZuCo task2-NR-2.0...')
+parser = argparse.ArgumentParser()
+parser.add_argument('-t', '--task_name', required=True,
+                    choices=['task2-NR-2.0', 'task2-TSR-2.0'],
+                    help='choose from {task2-NR-2.0, task2-TSR-2.0}')
+args = vars(parser.parse_args())
+task_name = args['task_name']
+
+# v2 mat filename suffix: results<SUBJ>_NR.mat / results<SUBJ>_TSR.mat
+mat_suffix = task_name.split('-')[1] + '.mat'  # 'NR.mat' or 'TSR.mat'
+
+rootdir = os.path.join(PROJECT_ROOT, "dataset", "ZuCo", task_name, "Matlab files")
+
+print(f'Processing ZuCo {task_name}...')
 print(f'Input: {rootdir}')
+print(f'Mat suffix filter: *{mat_suffix}')
 
 dataset_dict = {}
-for file in tqdm(os.listdir(rootdir)):
-    if file.endswith("NR.mat"):
+for file in tqdm(sorted(os.listdir(rootdir))):
+    if file.endswith(mat_suffix):
         file_name = os.path.join(rootdir, file)
         subject = file_name.split("results")[1].split("_")[0]
         if subject == 'YMH':
@@ -77,9 +95,9 @@ for file in tqdm(os.listdir(rootdir)):
 if not dataset_dict:
     print('No mat files found'); exit()
 
-output_dir = os.path.join(PROJECT_ROOT, "dataset", "ZuCo", "task2-NR-2.0", "pickle")
+output_dir = os.path.join(PROJECT_ROOT, "dataset", "ZuCo", task_name, "pickle")
 os.makedirs(output_dir, exist_ok=True)
-output_name = 'task2-NR-2.0-dataset.pickle'
+output_name = f'{task_name}-dataset.pickle'
 with open(os.path.join(output_dir, output_name), 'wb') as f:
     pickle.dump(dataset_dict, f, protocol=pickle.HIGHEST_PROTOCOL)
     print(f'Saved: {os.path.join(output_dir, output_name)}')

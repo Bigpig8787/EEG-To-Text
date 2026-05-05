@@ -9,17 +9,19 @@ from transformers import BartTokenizer
 from data.dataset import ZuCo_dataset
 
 PICKLE_PATHS = {
-    'task1':    './dataset/ZuCo/task1-SR/pickle/task1-SR-dataset.pickle',
-    'task2':    './dataset/ZuCo/task2-NR/pickle/task2-NR-dataset.pickle',
-    'task3':    './dataset/ZuCo/task3-TSR/pickle/task3-TSR-dataset.pickle',
-    'taskNRv2': './dataset/ZuCo/task2-NR-2.0/pickle/task2-NR-2.0-dataset.pickle',
+    'task1':     './dataset/ZuCo/task1-SR/pickle/task1-SR-dataset.pickle',
+    'task2':     './dataset/ZuCo/task2-NR/pickle/task2-NR-dataset.pickle',
+    'task3':     './dataset/ZuCo/task3-TSR/pickle/task3-TSR-dataset.pickle',
+    'taskNRv2':  './dataset/ZuCo/task2-NR-2.0/pickle/task2-NR-2.0-dataset.pickle',
+    'taskTSRv2': './dataset/ZuCo/task2-TSR-2.0/pickle/task2-TSR-2.0-dataset.pickle',
 }
 
 TASK_KEYS = {
-    'task1':                ['task1'],
-    'task1_task2':          ['task1', 'task2'],
-    'task1_task2_task3':    ['task1', 'task2', 'task3'],
-    'task1_task2_taskNRv2': ['task1', 'task2', 'taskNRv2'],
+    'task1':                                 ['task1'],
+    'task1_task2':                           ['task1', 'task2'],
+    'task1_task2_task3':                     ['task1', 'task2', 'task3'],
+    'task1_task2_taskNRv2':                  ['task1', 'task2', 'taskNRv2'],
+    'task1_task2_task3_taskNRv2_taskTSRv2':  ['task1', 'task2', 'task3', 'taskNRv2', 'taskTSRv2'],
 }
 
 DEFAULT_BANDS = ['_t1', '_t2', '_a1', '_a2', '_b1', '_b2', '_g1', '_g2']

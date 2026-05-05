@@ -82,10 +82,11 @@ if __name__ == '__main__':
     # data
     whole_dataset_dicts = []
     dd = os.path.join(PROJECT_ROOT, 'dataset', 'ZuCo')
-    for key, (task, fname) in {'task1': ('task1-SR','task1-SR-dataset.pickle'),
-                                'task2': ('task2-NR','task2-NR-dataset.pickle'),
-                                'task3': ('task3-TSR','task3-TSR-dataset.pickle'),
-                                'taskNRv2': ('task2-NR-2.0','task2-NR-2.0-dataset.pickle')}.items():
+    for key, (task, fname) in {'task1':     ('task1-SR',      'task1-SR-dataset.pickle'),
+                                'task2':     ('task2-NR',      'task2-NR-dataset.pickle'),
+                                'task3':     ('task3-TSR',     'task3-TSR-dataset.pickle'),
+                                'taskNRv2':  ('task2-NR-2.0',  'task2-NR-2.0-dataset.pickle'),
+                                'taskTSRv2': ('task2-TSR-2.0', 'task2-TSR-2.0-dataset.pickle')}.items():
         if key in task_name:
             with open(os.path.join(dd, task, 'pickle', fname), 'rb') as f:
                 whole_dataset_dicts.append(pickle.load(f))

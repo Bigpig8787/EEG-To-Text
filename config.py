@@ -15,7 +15,7 @@ def get_config(case):
         parser = argparse.ArgumentParser(description='Specify config args for training EEG-To-Text decoder')
         
         parser.add_argument('-m', '--model_name', help='choose from {BrainTranslator, BrainTranslatorNaive, MultiViewConformerTranslator}', default = "BrainTranslator" ,required=True)
-        parser.add_argument('-t', '--task_name', help='choose from {task1,task1_task2, task1_task2_task3,task1_task2_taskNRv2}', default = "task1", required=True)
+        parser.add_argument('-t', '--task_name', help='choose from {task1, task1_task2, task1_task2_task3, task1_task2_taskNRv2, task1_task2_task3_taskNRv2_taskTSRv2}', default = "task1", required=True)
         
         parser.add_argument('-1step', '--one_step', dest='skip_step_one', action='store_true')
         parser.add_argument('-2step', '--two_step', dest='skip_step_one', action='store_false')
