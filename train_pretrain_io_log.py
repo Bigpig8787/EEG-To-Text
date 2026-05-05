@@ -130,7 +130,8 @@ def main():
     for task, fname in [('task1-SR','task1-SR-dataset.pickle'),
                         ('task2-NR','task2-NR-dataset.pickle'),
                         ('task3-TSR','task3-TSR-dataset.pickle'),
-                        ('task2-NR-2.0','task2-NR-2.0-dataset.pickle')]:
+                        ('task2-NR-2.0','task2-NR-2.0-dataset.pickle'),
+                        ('task2-TSR-2.0','task2-TSR-2.0-dataset.pickle')]:
         p = os.path.join(dataset_dir, task, 'pickle', fname)
         if os.path.exists(p):
             pickle_paths.append(p)
