@@ -214,8 +214,11 @@ if __name__ == '__main__':
     WARMUP_RATIO   = 0.2
     PATIENCE       = 9999 if args.get('no_early_stop', False) else args.get('patience', 10)
     RESUME         = args.get('resume')
+    NO_LORA        = args.get('no_lora', False)
 
     save_suffix = '_cont' if RESUME else ''
+    if NO_LORA:
+        save_suffix += '_full'
     save_name = f'{TASK_NAME}_multiview_2step_b{BATCH_SIZE}_{STEP1_EPOCHS}_{STEP2_EPOCHS}_{LR1}_{LR2}_unique_sent{save_suffix}'
 
     np.random.seed(312)
@@ -333,17 +336,26 @@ if __name__ == '__main__':
     # STEP 2: apply LoRA, fine-tune all at low LR
     # ════════════════════════════════════════════════════════════════
     log('\n' + '=' * 60)
-    log(f'STEP 2 — LoRA fine-tune ({STEP2_EPOCHS} epochs, enc lr={LR2})')
+    if NO_LORA:
+        log(f'STEP 2 — full BART fine-tune ({STEP2_EPOCHS} epochs, enc lr={LR2})')
+    else:
+        log(f'STEP 2 — LoRA fine-tune ({STEP2_EPOCHS} epochs, enc lr={LR2})')
     log('=' * 60)
 
-    lora_cfg = LoraConfig(
-        task_type=TaskType.SEQ_2_SEQ_LM,
-        r=LORA_R, lora_alpha=LORA_ALPHA, lora_dropout=0.15,
-        target_modules=LORA_TARGETS,
-    )
-    model.pretrained = get_peft_model(model.pretrained, lora_cfg)
-    model.pretrained.print_trainable_parameters()
-    model.to(device)
+    if NO_LORA:
+        # Full fine-tune: unfreeze every BART parameter, no LoRA adapters.
+        for p in model.pretrained.parameters():
+            p.requires_grad = True
+        model.to(device)
+    else:
+        lora_cfg = LoraConfig(
+            task_type=TaskType.SEQ_2_SEQ_LM,
+            r=LORA_R, lora_alpha=LORA_ALPHA, lora_dropout=0.15,
+            target_modules=LORA_TARGETS,
+        )
+        model.pretrained = get_peft_model(model.pretrained, lora_cfg)
+        model.pretrained.print_trainable_parameters()
+        model.to(device)
 
     enc_p2, lora_p2, other_p2 = [], [], []
     for name, param in model.named_parameters():
@@ -357,13 +369,20 @@ if __name__ == '__main__':
         else:
             other_p2.append(param)
 
-    # LoRA adapters need LR >= encoder LR to adapt BART effectively.
-    # The previous LR2*0.1 was 10× too slow and is the primary cause of poor free-gen scores.
-    opt2 = optim.AdamW([
-        {'params': enc_p2,   'lr': LR2 * 0.2},  # protect warmed-up encoder from drift
-        {'params': lora_p2,  'lr': LR2 * 2.0},  # LoRA higher than enc: fast BART adaptation
-        {'params': other_p2, 'lr': LR2 * 0.1},  # keep pre-trained BART weights stable
-    ], weight_decay=0.05)
+    if NO_LORA:
+        # Full fine-tune: encoder slow, BART slower (other_p2 holds all BART params).
+        opt2 = optim.AdamW([
+            {'params': enc_p2,   'lr': LR2 * 0.2},
+            {'params': other_p2, 'lr': LR2 * 0.1},
+        ], weight_decay=0.05)
+    else:
+        # LoRA adapters need LR >= encoder LR to adapt BART effectively.
+        # The previous LR2*0.1 was 10× too slow and is the primary cause of poor free-gen scores.
+        opt2 = optim.AdamW([
+            {'params': enc_p2,   'lr': LR2 * 0.2},  # protect warmed-up encoder from drift
+            {'params': lora_p2,  'lr': LR2 * 2.0},  # LoRA higher than enc: fast BART adaptation
+            {'params': other_p2, 'lr': LR2 * 0.1},  # keep pre-trained BART weights stable
+        ], weight_decay=0.05)
 
     total_s2 = (len(train_loader) // GRAD_ACCUM) * STEP2_EPOCHS
     warm_s2  = int(total_s2 * WARMUP_RATIO)
@@ -382,8 +401,14 @@ if __name__ == '__main__':
     # ════════════════════════════════════════════════════════════════
     # Merge LoRA → save plain checkpoint (compatible with eval_multiview.py)
     # ════════════════════════════════════════════════════════════════
-    log('\n[INFO] Merging LoRA weights into BART...')
-    model.pretrained = model.pretrained.merge_and_unload()
-    merged_path = ckpt_best.replace('.pt', '_merged.pt')
-    torch.save(model.state_dict(), merged_path)
-    log(f'[INFO] Merged checkpoint saved: {merged_path}')
+    if NO_LORA:
+        log('\n[INFO] No LoRA to merge (full fine-tune). Saving plain checkpoint...')
+        merged_path = ckpt_best.replace('.pt', '_merged.pt')
+        torch.save(model.state_dict(), merged_path)
+        log(f'[INFO] Plain checkpoint saved: {merged_path}')
+    else:
+        log('\n[INFO] Merging LoRA weights into BART...')
+        model.pretrained = model.pretrained.merge_and_unload()
+        merged_path = ckpt_best.replace('.pt', '_merged.pt')
+        torch.save(model.state_dict(), merged_path)
+        log(f'[INFO] Merged checkpoint saved: {merged_path}')

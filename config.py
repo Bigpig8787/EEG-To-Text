@@ -48,6 +48,8 @@ def get_config(case):
         parser.add_argument('-cuda', '--cuda', help='specify cuda device name, e.g. cuda:0, cuda:1, etc', default = 'cuda:0')
         parser.add_argument('--resume', type=str, default=None,
                             help='path to merged checkpoint (.pt) to resume training from; skips encoder_best load and step1, runs step2 only with fresh LoRA')
+        parser.add_argument('--no_lora', action='store_true',
+                            help='disable LoRA in step2; unfreeze all BART params for full fine-tune (use with --resume to continue from a step1 or merged checkpoint)')
         
         args = vars(parser.parse_args())
 
