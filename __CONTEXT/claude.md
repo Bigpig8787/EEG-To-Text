@@ -4,6 +4,7 @@
 - 重要的決策定期記錄在Markdown文件中
 - 記得如果架構還是使用方法有變都幫我記錄到readme.md裡
 - 每一版重大改動都寫入 verion.md裡
+- 有改動模型內容後輸出應該的.bat
 
 # CLAUDE.md — EEG-To-Text Multi-View Conformer Project
 
