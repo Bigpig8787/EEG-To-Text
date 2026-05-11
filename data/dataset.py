@@ -110,6 +110,7 @@ def get_input_sample(sent_obj, tokenizer, eeg_type='GD',
     if raw is not None:
         raw_eeg = np.nan_to_num(raw, nan=0.0, posinf=0.0, neginf=0.0)
         T = raw_eeg.shape[1]
+        actual_T = min(T, RAW_EEG_MAX_LEN)
         if T < RAW_EEG_MAX_LEN:
             padded = np.zeros((105, RAW_EEG_MAX_LEN), dtype=np.float32)
             padded[:, :T] = raw_eeg
@@ -127,11 +128,13 @@ def get_input_sample(sent_obj, tokenizer, eeg_type='GD',
             region: torch.from_numpy(arr.copy()).float()
             for region, arr in raw_views.items()
         }
+        input_sample['raw_eeg_len'] = actual_T
     else:
         input_sample['raw_eeg_views'] = {
             region: torch.zeros(ch_count, RAW_EEG_MAX_LEN, dtype=torch.float32)
             for region, ch_count in BRAIN_REGION_CHANNEL_COUNT.items()
         }
+        input_sample['raw_eeg_len'] = 0
 
     return input_sample
 
@@ -205,4 +208,5 @@ class ZuCo_dataset(Dataset):
             s['sentiment_label'],
             s['sent_level_EEG'],
             s.get('raw_eeg_views', {}),
+            s.get('raw_eeg_len', 0),
         )

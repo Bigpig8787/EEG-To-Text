@@ -23,7 +23,7 @@ def eval_model(dataloaders, device, tokenizer, model, teacher_forcing, input_noi
     target_list, pred_list = [], []
 
     with open(output_results_path, 'w', encoding='utf-8') as f:
-        for (_, _, masks, mask_inv, target_ids, _, _, _, raw_views) in tqdm(dataloaders['test'], desc='Eval'):
+        for (_, _, masks, mask_inv, target_ids, _, _, _, raw_views, raw_eeg_len) in tqdm(dataloaders['test'], desc='Eval'):
             if not raw_views:
                 continue
 
@@ -31,6 +31,7 @@ def eval_model(dataloaders, device, tokenizer, model, teacher_forcing, input_noi
             masks_batch = masks.to(device)
             mask_inv_batch = mask_inv.to(device)
             view_inputs = {k: v.to(device).float() for k, v in raw_views.items()}
+            raw_eeg_lens = raw_eeg_len.to(device)
 
             if input_noise:
                 view_inputs = {k: torch.rand_like(v) for k, v in view_inputs.items()}
@@ -41,11 +42,13 @@ def eval_model(dataloaders, device, tokenizer, model, teacher_forcing, input_noi
 
             with torch.no_grad():
                 if teacher_forcing:
-                    out = model(view_inputs, masks_batch, mask_inv_batch, target_ids_batch)
+                    out = model(view_inputs, masks_batch, mask_inv_batch,
+                                target_ids_batch, raw_eeg_lens=raw_eeg_lens)
                     predictions = out.logits.softmax(dim=-1).topk(1).indices.squeeze(-1)
                 else:
                     predictions = model.generate(view_inputs, masks_batch, mask_inv_batch,
-                                                 target_ids_batch, max_new_tokens=50, num_beams=5,
+                                                 target_ids_batch, raw_eeg_lens=raw_eeg_lens,
+                                                 max_new_tokens=50, num_beams=5,
                                                  do_sample=False, repetition_penalty=1.5,
                                                  no_repeat_ngram_size=3,
                                                  forced_bos_token_id=tokenizer.bos_token_id,

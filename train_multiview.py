@@ -116,7 +116,7 @@ def train_model(dataloaders, device, model, tokenizer, optimizer, scheduler, sca
 
             pbar = tqdm(enumerate(dataloaders[phase]), total=len(dataloaders[phase]), desc=phase)
             for step, (input_emb, seq_len, masks, mask_inv, target_ids,
-                       target_mask, sentiment, sent_eeg, raw_views) in pbar:
+                       target_mask, sentiment, sent_eeg, raw_views, raw_eeg_len) in pbar:
 
                 if not raw_views:
                     continue
@@ -125,13 +125,15 @@ def train_model(dataloaders, device, model, tokenizer, optimizer, scheduler, sca
                 masks_batch = masks.to(device)
                 mask_inv_batch = mask_inv.to(device)
                 view_inputs = {k: v.to(device).float() for k, v in raw_views.items()}
+                raw_eeg_lens = raw_eeg_len.to(device)
                 target_ids_batch[target_ids_batch == tokenizer.pad_token_id] = -100
 
                 view_inputs = augment_eeg_views(view_inputs, is_train=(phase == 'train'))
 
                 with torch.set_grad_enabled(phase == 'train'):
                     with autocast():
-                        output = model(view_inputs, masks_batch, mask_inv_batch, target_ids_batch)
+                        output = model(view_inputs, masks_batch, mask_inv_batch,
+                                       target_ids_batch, raw_eeg_lens=raw_eeg_lens)
                         if label_smooth > 0.0:
                             lm_logits = output.logits
                             labels = target_ids_batch.clone()
