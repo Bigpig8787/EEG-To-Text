@@ -1,4 +1,4 @@
-# TODO / 改動紀錄
+ㄋ# TODO / 改動紀錄
 
 ## 2026-05-10 — Step2 全 BART Fine-tune 模式 (no LoRA)
 

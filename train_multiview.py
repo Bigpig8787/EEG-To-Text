@@ -216,7 +216,7 @@ if __name__ == '__main__':
     WARMUP_RATIO   = 0.2
     PATIENCE       = 9999 if args.get('no_early_stop', False) else args.get('patience', 10)
     RESUME         = args.get('resume')
-    NO_LORA        = args.get('no_lora', False)
+    NO_LORA        = True  # forced: step2 always full BART fine-tune, LoRA path disabled
 
     save_suffix = '_cont' if RESUME else ''
     if NO_LORA:

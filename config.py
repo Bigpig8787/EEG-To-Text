@@ -32,7 +32,7 @@ def get_config(case):
         parser.add_argument('-lr2', '--learning_rate_step2', type = float, help='learning_rate_step2', default = 0.0000005, required=True)
         parser.add_argument('-b', '--batch_size', type = int, help='batch_size', default = 32, required=True)
 
-        parser.add_argument('-patience', '--patience', type=int, help='early stopping patience (epochs)', default=15)
+        parser.add_argument('-patience', '--patience', type=int, help='early stopping patience (epochs)', default=10)
         parser.add_argument('-no_early_stop', '--no_early_stop', action='store_true', help='disable early stopping')
         parser.add_argument('-lora_r', '--lora_r', type=int, help='LoRA rank', default=16)
         parser.add_argument('-lora_targets', '--lora_targets', nargs='+',
