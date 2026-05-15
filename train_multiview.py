@@ -41,10 +41,12 @@ from models.multiview import MultiViewConformerTranslator
 def augment_eeg_views(view_inputs: dict, is_train: bool = True) -> dict:
     """EEG data augmentation applied per-batch during training.
 
-    Three transforms applied independently with independent probabilities:
+    Transforms applied independently with independent probabilities:
       - Amplitude scaling  (p=0.7): multiply by uniform(0.80, 1.20)
       - Gaussian noise     (p=0.5): add N(0, 0.03) noise
       - Time shift         (p=0.5): circular roll ±5 % of T
+      - Time mask          (p=0.5): zero out random window up to 10 % of T (SpecAugment-style)
+      - Channel dropout    (p=0.3): zero out 1-2 random channels per sample
     """
     if not is_train:
         return view_inputs
@@ -64,6 +66,19 @@ def augment_eeg_views(view_inputs: dict, is_train: bool = True) -> dict:
             shift = random.randint(-T // 20, T // 20)
             if shift != 0:
                 eeg = torch.roll(eeg, shift, dims=2)
+        # time mask (SpecAugment-style)
+        if random.random() < 0.5 and T > 10:
+            max_w = max(1, T // 10)
+            w = random.randint(1, max_w)
+            t0 = random.randint(0, T - w)
+            eeg = eeg.clone()
+            eeg[:, :, t0:t0 + w] = 0.0
+        # channel dropout
+        if random.random() < 0.3 and C > 2:
+            n_drop = random.randint(1, 2)
+            drop_idx = torch.randperm(C, device=eeg.device)[:n_drop]
+            eeg = eeg.clone()
+            eeg[:, drop_idx, :] = 0.0
         augmented[region] = eeg
     return augmented
 
@@ -234,10 +249,11 @@ if __name__ == '__main__':
     whole_dataset_dicts = []
     dd = os.path.join(PROJECT_ROOT, 'dataset', 'ZuCo')
     task_map = {
-        'task1':    ('task1-SR',    'task1-SR-dataset.pickle'),
-        'task2':    ('task2-NR',    'task2-NR-dataset.pickle'),
-        'task3':    ('task3-TSR',   'task3-TSR-dataset.pickle'),
-        'taskNRv2': ('task2-NR-2.0','task2-NR-2.0-dataset.pickle'),
+        'task1':     ('task1-SR',      'task1-SR-dataset.pickle'),
+        'task2':     ('task2-NR',      'task2-NR-dataset.pickle'),
+        'task3':     ('task3-TSR',     'task3-TSR-dataset.pickle'),
+        'taskNRv2':  ('task2-NR-2.0',  'task2-NR-2.0-dataset.pickle'),
+        'taskTSRv2': ('task2-TSR-2.0', 'task2-TSR-2.0-dataset.pickle'),
     }
     for key, (task, fname) in task_map.items():
         if key in TASK_NAME:
@@ -270,7 +286,7 @@ if __name__ == '__main__':
 
     model = MultiViewConformerTranslator(
         bart, d_model=512, n_filters=40, temporal_kernel=200,
-        pool_stride=100, tokens_per_view=32, n_heads=8,
+        pool_stride=100, tokens_per_view=32, n_cls_per_view=8, n_heads=8,
         n_encoder_layers=4, n_global_layers=3, dropout=0.1,
         decoder_embedding_size=1024,
     )
