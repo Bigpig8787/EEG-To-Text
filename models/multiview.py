@@ -24,8 +24,8 @@ class RegionalConformerEncoder(nn.Module):
       local - (B, T, d_model)   per-view local tokens passed to the BART decoder
     """
     def __init__(self, n_channels, d_model=512, n_filters=40,
-                 temporal_kernel=200, pool_stride=100,
-                 tokens_per_view=32, n_cls_tokens=4,
+                 temporal_kernel=200, pool_stride=25,
+                 tokens_per_view=128, n_cls_tokens=4,
                  n_heads=8, n_transformer_layers=4, dropout=0.1):
         super().__init__()
         self.tokens_per_view = tokens_per_view
@@ -96,8 +96,8 @@ class RegionalConformerEncoder(nn.Module):
 
 class MultiViewConformerTranslator(BaseEEGModel):
     def __init__(self, pretrained_bart, d_model=512, n_filters=40,
-                 temporal_kernel=200, pool_stride=100,
-                 tokens_per_view=32, n_cls_per_view=4,
+                 temporal_kernel=200, pool_stride=25,
+                 tokens_per_view=128, n_cls_per_view=4,
                  n_heads=8, n_encoder_layers=4,
                  n_global_layers=3, dropout=0.1,
                  decoder_embedding_size=1024):

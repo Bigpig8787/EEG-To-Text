@@ -231,7 +231,7 @@ if __name__ == '__main__':
     WARMUP_RATIO   = 0.2
     PATIENCE       = 9999 if args.get('no_early_stop', False) else args.get('patience', 10)
     RESUME         = args.get('resume')
-    NO_LORA        = True  # forced: step2 always full BART fine-tune, LoRA path disabled
+    NO_LORA        = False  # LoRA fine-tune enabled (r=16) on q/k/v/out_proj
 
     save_suffix = '_cont' if RESUME else ''
     if NO_LORA:
@@ -286,7 +286,7 @@ if __name__ == '__main__':
 
     model = MultiViewConformerTranslator(
         bart, d_model=512, n_filters=40, temporal_kernel=200,
-        pool_stride=100, tokens_per_view=32, n_cls_per_view=8, n_heads=8,
+        pool_stride=25, tokens_per_view=128, n_cls_per_view=8, n_heads=8,
         n_encoder_layers=4, n_global_layers=3, dropout=0.1,
         decoder_embedding_size=1024,
     )
