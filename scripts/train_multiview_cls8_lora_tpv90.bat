@@ -10,7 +10,7 @@ REM   - NO --no_lora flag (ignored anyway; NO_LORA hardcoded False)
 REM   - peft MUST be installed in this env: pip install peft
 REM   - CANNOT resume from old tokens_per_view=32 ckpt: token geometry differs
 REM   - Separate save dir to avoid collision with full-FT cls8 baseline
-REM   - 50 + 70 epochs, label_smooth=0.1, no early stop, batch 4 (lower if OOM)
+REM   - 50 + 70 epochs, label_smooth=0.1, early-stop patience=10, batch 4 (lower if OOM)
 REM   - save_name has NO _full suffix (LoRA path): ..._unique_sent_merged.pt
 REM   - Output: ./checkpoints/multiview_cls8_lora_tpv90/best/<save_name>_merged.pt
 python train_multiview.py ^
@@ -25,7 +25,7 @@ python train_multiview.py ^
     -lr2 0.0000005 ^
     -b 4 ^
     --label_smooth 0.1 ^
-    --no_early_stop ^
+    --patience 10 ^
     --lora_r 16 ^
     -s ./checkpoints/multiview_cls8_lora_tpv90 ^
     -cuda cuda:0
