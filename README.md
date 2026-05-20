@@ -155,8 +155,8 @@ Output: (B, 100, 512)
 | `grad_accum_steps` | 2 | 等效 batch = 8 |
 | `mask_ratio`（pretrain） | 0.15 | 遮蔽比（paper-spec） |
 | `temporal_kernel` | 200 | CNN kernel（paper-spec，原 25） |
-| `pool_stride` | 100 | CNN stride，5000→50 tokens（paper-spec，原 10） |
-| `tokens_per_view` | 32 | AdaptiveAvgPool 後每 view token 數（原 100） |
+| `pool_stride` | 100 (pretrain) / 50 (multiview) | pretrain CNN stride=100（5000→50）；multiview hardcode stride=50（5000→100） |
+| `tokens_per_view` | 64 (multiview) | AdaptiveAvgPool 後每 view token 數。multiview=64（V*(k+T)=10*(8+64)=720≤1024）；pretrain 不適用 |
 
 ---
 
