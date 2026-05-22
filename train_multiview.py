@@ -231,7 +231,7 @@ if __name__ == '__main__':
     WARMUP_RATIO   = 0.2
     PATIENCE       = 9999 if args.get('no_early_stop', False) else args.get('patience', 10)
     RESUME         = args.get('resume')
-    NO_LORA        = False  # LoRA fine-tune enabled (r=16) on q/k/v/out_proj
+    NO_LORA        = args.get('no_lora', False)  # --no_lora -> full BART fine-tune; else LoRA r=16
 
     save_suffix = '_cont' if RESUME else ''
     if NO_LORA:
