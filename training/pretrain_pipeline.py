@@ -85,12 +85,16 @@ class PretrainPipeline:
                 pbar = tqdm(loader, desc=f'pretrain {phase} e{epoch+1}')
                 for raw_eeg, actual_len in pbar:
                     raw_eeg = raw_eeg.to(self.device).float()
-                    masked, mask = create_remask(raw_eeg, mask_ratio=cfg.mask_ratio)
+                    masked, mask = create_remask(raw_eeg, mask_ratio=cfg.mask_ratio,
+                                                 block_size=cfg.pool_stride)
 
                     with torch.set_grad_enabled(is_train):
                         if is_train and scaler:
                             with autocast():
-                                recon    = model(masked)
+                                # `mask` must reach the model: without it the encoder
+                                # sees the full latent sequence and the objective is
+                                # no longer masked autoencoding.
+                                recon    = model(masked, mask)
                                 mask_exp = mask.expand_as(raw_eeg)
                                 loss     = mse(recon[mask_exp], raw_eeg[mask_exp])
                             scaler.scale(loss).backward()
@@ -101,7 +105,7 @@ class PretrainPipeline:
                             opt.zero_grad()
                         else:
                             with torch.no_grad():
-                                recon    = model(masked)
+                                recon    = model(masked, mask)
                                 mask_exp = mask.expand_as(raw_eeg)
                                 loss     = mse(recon[mask_exp], raw_eeg[mask_exp])
 

@@ -62,23 +62,54 @@ class ConformerEncoder(nn.Module):
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_transformer_layers)
 
     def forward(self, x, mask=None):
+        """Encode raw EEG, optionally under an MAE mask.
+
+        Follows the same convention as the SNN `LocalTransformerV2`: positional
+        encoding is added *before* masking, and masked tokens are then **dropped
+        from the sequence** rather than zeroed. Every surviving token therefore
+        still carries the absolute position it held in the full sequence, and the
+        transformer only ever attends over real signal.
+
+        Args:
+            x: (B, C, T). Masked time points are already zeroed by `create_remask`.
+            mask: (B, 1, T) bool, True = masked. `None` for fine-tuning / inference.
+
+        Returns:
+            mask is None: (B, L, d_model) with L = T // pool_stride.
+            mask given:   ((B, L_visible, d_model), keep), where `keep` is a
+                (B, L) bool marking which latent slots survived. The decoder needs
+                it to put the visible tokens back in place.
+        """
         x = x.unsqueeze(1)
         x = self.temporal_conv(x)
         if mask is not None:
+            # The convolutions are 200 samples wide, so visible signal bleeds into
+            # masked positions. Re-zero after each one to keep the masked windows
+            # information-free.
             x = x.masked_fill(mask.unsqueeze(1), 0.0)
         x = self.spatial_conv(x)
         if mask is not None:
             x = x.masked_fill(mask.unsqueeze(1), 0.0)
         x = self.pool(x)
-        if mask is not None:
-            pooled_mask = F.max_pool1d(
-                mask.float().squeeze(1),
-                kernel_size=self.pool_stride, stride=self.pool_stride,
-            ).bool().unsqueeze(1).unsqueeze(1)
-            x = x.masked_fill(pooled_mask, 0.0)
         x = self.dropout(x)
         x = x.squeeze(2).permute(0, 2, 1)
         x = self.projection(x)
+
         x = self.pos_encoding(x)
+
+        if mask is None:
+            return self.transformer(x)
+
+        # A pool window survives only if *none* of its `pool_stride` time points
+        # was masked. `create_remask` masks whole pool-aligned blocks, and the same
+        # number of them for every sample in the batch, so `keep.sum(1)` is uniform
+        # and the reshape below is well defined.
+        window_masked = F.max_pool1d(
+            mask.float().squeeze(1),
+            kernel_size=self.pool_stride, stride=self.pool_stride,
+        ).bool()                                   # (B, L) True = window touched by mask
+        keep = ~window_masked                      # (B, L) True = fully visible
+        batch, _, d_model = x.shape
+        x = x[keep].reshape(batch, -1, d_model)    # (B, L_visible, d_model)
         x = self.transformer(x)
-        return x
+        return x, keep

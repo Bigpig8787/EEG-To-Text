@@ -173,7 +173,8 @@ def main():
             attn = attn.to(device, non_blocking=True)
 
             if args['mask_ratio'] > 0:
-                eeg_in, mask = create_remask(eeg, mask_ratio=args['mask_ratio'])
+                eeg_in, mask = create_remask(eeg, mask_ratio=args['mask_ratio'],
+                                             block_size=args['pool_stride'])
             else:
                 eeg_in, mask = eeg, None
 

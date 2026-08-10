@@ -138,11 +138,18 @@ Every training run shows train loss dropping but dev loss exploding. Summary of 
 
 ## Training Commands
 
-### Pre-training (already done, encoder saved)
+### Pre-training (**needs re-running** — see 2026-07-29 in version.md)
 ```cmd
+REM verify the MAE masking path first (random tensors, no dataset, no GPU)
+python scripts\test_mae_masking.py
+
 scripts\train_pretrain.bat
 ```
 Output: `checkpoints/pretrain/encoder_best.pt`
+
+The existing `encoder_best.pt` (val_loss 0.290) was trained under a broken mask
+— per-time-point masking collapsed every pooling window, so the encoder saw no
+EEG. Treat it as untrained.
 
 ### Multi-view fine-tuning
 ```cmd
@@ -182,13 +189,33 @@ ZuCo dataset loader. Returns both word-level features (for baseline) AND raw_eeg
 ### data/channel_mapping.py
 Maps 105 EEG channels to 10 brain regions. Each channel index (0-104) maps to the original EGI electrode number minus the 23 removed outer-ring electrodes.
 
+## MAE Pre-training (rewritten 2026-07-29)
+
+Now matches the SNN `LocalTransformerV2` / `TransformerDecoder` convention:
+
+1. `create_remask(x, mask_ratio, block_size=pool_stride)` masks whole
+   **pool-aligned blocks**, the same count for every sample in the batch.
+2. `ConformerEncoder` adds positional encoding **first**, then **drops** the
+   masked windows. Survivors keep their absolute position; attention only sees
+   real signal. Returns `(visible_tokens, keep)` when masked.
+3. `ConformerDecoder` scatters the visible tokens back into their slots, fills
+   the dropped ones with a learnable `mask_token`, adds a learnable latent
+   positional embedding, then deconvolves back to full length.
+
+The previous per-time-point masking left a pooling window with survival
+probability `0.85 ** 100 ≈ 9e-8`, so pre-training reconstructed from positional
+encoding alone.
+
 ## Pre-training Results
 | Config | val_loss | Training time |
 |--------|----------|---------------|
 | stride=50, d_model=256 | 0.525 | 268 min |
 | stride=10, d_model=512 | **0.290** | 278 min |
 
-Pre-trained encoder weights: `checkpoints/pretrain/encoder_best.pt` (copied from `pretrain_s10_d512/conformer_encoder_best.pt`)
+**Both numbers predate the 2026-07-29 masking fix and are not comparable to
+anything trained after it.** Pre-trained encoder weights:
+`checkpoints/pretrain/encoder_best.pt` (copied from
+`pretrain_s10_d512/conformer_encoder_best.pt`).
 
 ## Known Issues
 1. `peft` must be version 0.6.2 (newer versions incompatible with installed transformers)
@@ -196,6 +223,13 @@ Pre-trained encoder weights: `checkpoints/pretrain/encoder_best.pt` (copied from
 3. `data.py` discards samples based on word-level features even when only raw EEG is needed
 4. `.gitignore` should exclude `*.pt`, `*.pickle`, `*.mat` (large binary files)
 5. `util/construct_dataset_mat_to_pickle_v2.py` needs `data_loading_helpers_modified.py` in the same directory
+6. `ConformerEncoder` calls `self.transformer(x)` with no `src_key_padding_mask`,
+   so raw EEG zero-padded up to 5000 is still attended over. The fine-tune path
+   (`RegionalConformerEncoder` in `models/multiview.py`) already builds and
+   passes one; the pre-train encoder does not.
+7. Old *full-model* pre-train checkpoints no longer load with `strict=True` —
+   `ConformerDecoder` gained `mask_token` and `latent_pos` on 2026-07-29.
+   Encoder-only checkpoints are unaffected.
 
 ## References
 - Wang, Z. and Ji, H. (2021). Open vocabulary EEG-to-text decoding and zero-shot sentiment classification.

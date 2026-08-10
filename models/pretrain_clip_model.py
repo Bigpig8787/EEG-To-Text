@@ -31,11 +31,13 @@ class ConformerCLIPModel(nn.Module):
         )
 
     def encode(self, x_masked, mask=None):
-        h = self.encoder(x_masked, mask=mask)  # (B, T', d_model)
-        # Mean-pool over time. If mask provided over original T, we ignore for
-        # simplicity — encoder's downsampling collapses time, so a uniform mean
-        # is a reasonable approximation.
-        pooled = h.mean(dim=1)
+        h = self.encoder(x_masked, mask=mask)
+        if mask is not None:
+            # Under a mask the encoder returns (visible_tokens, keep) and has
+            # already dropped the masked windows, so the mean below runs over
+            # visible tokens only — no need for the keep map here.
+            h, _ = h
+        pooled = h.mean(dim=1)  # (B, d_model)
         z = self.proj(pooled)
         return F.normalize(z, dim=-1)
 

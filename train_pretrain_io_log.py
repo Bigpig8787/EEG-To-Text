@@ -67,14 +67,14 @@ def get_args():
     return vars(parser.parse_args())
 
 
-def save_io_sample(model, val_loader, device, epoch, mask_ratio):
+def save_io_sample(model, val_loader, device, epoch, mask_ratio, block_size=100):
     """Run a single validation sample through the model and persist
     (input, recon, mask, stats) to disk + write a one-line summary to log."""
     model.eval()
     with torch.no_grad():
         batch_eeg, _ = next(iter(val_loader))
         batch_eeg = batch_eeg.to(device)
-        x_masked, mask = create_remask(batch_eeg, mask_ratio)
+        x_masked, mask = create_remask(batch_eeg, mask_ratio, block_size=block_size)
         x_recon = model(x_masked, mask)
         mask_exp = mask.expand_as(batch_eeg)
 
@@ -163,7 +163,8 @@ def main():
     best_wts = None
 
     # Snapshot at epoch -1 (untrained model) for a baseline comparison.
-    save_io_sample(model, io_loader, device, epoch=-1, mask_ratio=args['mask_ratio'])
+    save_io_sample(model, io_loader, device, epoch=-1, mask_ratio=args['mask_ratio'],
+                   block_size=args['pool_stride'])
 
     for epoch in range(args['num_epochs']):
         # train
@@ -171,7 +172,8 @@ def main():
         total_loss, n = 0.0, 0
         for batch_eeg, _ in tqdm(train_loader, desc=f'Epoch {epoch}'):
             batch_eeg = batch_eeg.to(device)
-            x_masked, mask = create_remask(batch_eeg, args['mask_ratio'])
+            x_masked, mask = create_remask(batch_eeg, args['mask_ratio'],
+                                           block_size=args['pool_stride'])
             x_recon = model(x_masked, mask)
             mask_exp = mask.expand_as(batch_eeg)
             loss = (F.mse_loss(x_recon[mask_exp], batch_eeg[mask_exp])
@@ -190,7 +192,8 @@ def main():
         with torch.no_grad():
             for batch_eeg, _ in val_loader:
                 batch_eeg = batch_eeg.to(device)
-                x_masked, mask = create_remask(batch_eeg, args['mask_ratio'])
+                x_masked, mask = create_remask(batch_eeg, args['mask_ratio'],
+                                               block_size=args['pool_stride'])
                 x_recon = model(x_masked, mask)
                 mask_exp = mask.expand_as(batch_eeg)
                 loss = (F.mse_loss(x_recon[mask_exp], batch_eeg[mask_exp])
@@ -205,7 +208,8 @@ def main():
 
         # I/O snapshot — fixed validation sample, this epoch's weights
         save_io_sample(model, io_loader, device, epoch=epoch,
-                       mask_ratio=args['mask_ratio'])
+                       mask_ratio=args['mask_ratio'],
+                       block_size=args['pool_stride'])
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
