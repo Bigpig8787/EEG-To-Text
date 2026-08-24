@@ -40,6 +40,10 @@ def get_config(case):
                             default=['q_proj', 'k_proj', 'v_proj', 'out_proj'])
         parser.add_argument('-label_smooth', '--label_smooth', type=float,
                             help='label smoothing epsilon (0=off)', default=0.1)
+        parser.add_argument('-suffix', '--save_suffix', type=str, default='',
+                            help='extra suffix appended to save_name; use it to keep runs that '
+                                 'differ only in a parameter absent from save_name (e.g. lora_r) '
+                                 'from overwriting each other in config/decoding/')
 
         parser.add_argument('-s', '--save_path', help='checkpoint save path', default = './checkpoints/decoding', required=True)
         parser.add_argument('-subj', '--subjects', help='use all subjects or specify a particular one', default = 'ALL', required=False)
