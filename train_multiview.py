@@ -232,10 +232,28 @@ if __name__ == '__main__':
     PATIENCE       = 9999 if args.get('no_early_stop', False) else args.get('patience', 10)
     RESUME         = args.get('resume')
     NO_LORA        = args.get('no_lora', False)  # --no_lora -> full BART fine-tune; else LoRA r=16
+    LR_LORA        = args.get('lr_lora')         # None -> historical LR2 * 2.0
+
+    # ── architecture (defaults reproduce the previously hard-coded geometry) ──
+    D_MODEL           = args.get('d_model', 512)
+    N_FILTERS         = args.get('n_filters', 40)
+    N_SPATIAL_FILTERS = args.get('n_spatial_filters')      # None -> same as N_FILTERS
+    TEMPORAL_KERNEL   = args.get('temporal_kernel', 200)
+    POOL_STRIDE       = args.get('pool_stride', 50)
+    TOKENS_PER_VIEW   = args.get('tokens_per_view', 64)
+    N_CLS_PER_VIEW    = args.get('n_cls_per_view', 8)
+    N_HEADS           = args.get('n_heads', 8)
+    N_ENCODER_LAYERS  = args.get('n_encoder_layers', 4)
+    N_GLOBAL_LAYERS   = args.get('n_global_layers', 3)
+    DROPOUT           = args.get('dropout', 0.1)
 
     save_suffix = '_cont' if RESUME else ''
     if NO_LORA:
         save_suffix += '_full'
+    # Neither lora_r nor the architecture appears in save_name, so runs that differ
+    # only in those would overwrite each other's config/decoding/<save_name>.json.
+    # --save_suffix keeps them apart without renaming any existing run.
+    save_suffix += args.get('save_suffix', '') or ''
     save_name = f'{TASK_NAME}_multiview_2step_b{BATCH_SIZE}_{STEP1_EPOCHS}_{STEP2_EPOCHS}_{LR1}_{LR2}_unique_sent{save_suffix}'
 
     np.random.seed(312)
@@ -285,11 +303,23 @@ if __name__ == '__main__':
         bart = BartForConditionalGeneration.from_pretrained('facebook/bart-large')
 
     model = MultiViewConformerTranslator(
-        bart, d_model=512, n_filters=40, temporal_kernel=200,
-        pool_stride=50, tokens_per_view=64, n_cls_per_view=8, n_heads=8,
-        n_encoder_layers=4, n_global_layers=3, dropout=0.1,
-        decoder_embedding_size=1024,
+        bart, d_model=D_MODEL, n_filters=N_FILTERS,
+        n_spatial_filters=N_SPATIAL_FILTERS, temporal_kernel=TEMPORAL_KERNEL,
+        pool_stride=POOL_STRIDE, tokens_per_view=TOKENS_PER_VIEW,
+        n_cls_per_view=N_CLS_PER_VIEW, n_heads=N_HEADS,
+        n_encoder_layers=N_ENCODER_LAYERS, n_global_layers=N_GLOBAL_LAYERS,
+        dropout=DROPOUT, decoder_embedding_size=1024,
     )
+    _n_views = len(model.region_names)
+    log(f'[INFO] Architecture: d_model={D_MODEL} filters={N_FILTERS}'
+        f'->{N_SPATIAL_FILTERS if N_SPATIAL_FILTERS is not None else N_FILTERS} '
+        f'tk={TEMPORAL_KERNEL} pool={POOL_STRIDE} tpv={TOKENS_PER_VIEW} '
+        f'cls={N_CLS_PER_VIEW} heads={N_HEADS} '
+        f'layers={N_ENCODER_LAYERS}L/{N_GLOBAL_LAYERS}G dropout={DROPOUT}')
+    log(f'[INFO] BART input sequence: {_n_views}*({N_CLS_PER_VIEW}+{TOKENS_PER_VIEW}) '
+        f'= {_n_views * (N_CLS_PER_VIEW + TOKENS_PER_VIEW)} tokens')
+    log(f'[INFO] Encoder-side params: '
+        f'{sum(p.numel() for n_, p in model.named_parameters() if not n_.startswith("pretrained.")):,}')
 
     encoder_path = os.path.join(PROJECT_ROOT, 'checkpoints', 'pretrain', 'encoder_best.pt')
     if RESUME:
@@ -396,11 +426,16 @@ if __name__ == '__main__':
     else:
         # LoRA adapters need LR >= encoder LR to adapt BART effectively.
         # The previous LR2*0.1 was 10× too slow and is the primary cause of poor free-gen scores.
+        # --lr_lora sets the adapter LR outright; the SNN pipeline specifies it that
+        # way (lr_lora, decoupled from learning_rate_step2) so matching it needs an
+        # absolute value rather than a multiple of LR2.
+        lora_lr = LR2 * 2.0 if LR_LORA is None else LR_LORA
         opt2 = optim.AdamW([
             {'params': enc_p2,   'lr': LR2 * 0.2},  # protect warmed-up encoder from drift
-            {'params': lora_p2,  'lr': LR2 * 2.0},  # LoRA higher than enc: fast BART adaptation
+            {'params': lora_p2,  'lr': lora_lr},    # LoRA higher than enc: fast BART adaptation
             {'params': other_p2, 'lr': LR2 * 0.1},  # keep pre-trained BART weights stable
         ], weight_decay=0.05)
+        log(f'[INFO] Step-2 LRs: enc={LR2 * 0.2:g} lora={lora_lr:g} other={LR2 * 0.1:g}')
 
     total_s2 = (len(train_loader) // GRAD_ACCUM) * STEP2_EPOCHS
     warm_s2  = int(total_s2 * WARMUP_RATIO)

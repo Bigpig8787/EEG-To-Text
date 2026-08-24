@@ -155,8 +155,55 @@ Output: (B, 100, 512)
 | `grad_accum_steps` | 2 | 等效 batch = 8 |
 | `mask_ratio`（pretrain） | 0.15 | 遮蔽比（paper-spec） |
 | `temporal_kernel` | 200 | CNN kernel（paper-spec，原 25） |
-| `pool_stride` | 100 (pretrain) / 50 (multiview) | pretrain CNN stride=100（5000→50）；multiview hardcode stride=50（5000→100） |
+| `pool_stride` | 100 (pretrain) / 50 (multiview) | pretrain CNN stride=100（5000→50）；multiview 預設 stride=50（5000→100） |
 | `tokens_per_view` | 64 (multiview) | AdaptiveAvgPool 後每 view token 數。multiview=64（V*(k+T)=10*(8+64)=720≤1024）；pretrain 不適用 |
+
+### 架構已改為 CLI 可設定（2026-08-25）
+
+`MultiViewConformerTranslator` 的幾何參數原本寫死在 `train_multiview.py` 與
+`eval_multiview.py` 兩處，必須手動同步。現在全部是 `config.py` 的參數，
+**預設值等於原本寫死的數字**，既有腳本產生的模型與 `save_name` 完全不變。
+
+| 參數 | 預設 | 說明 |
+|------|------|------|
+| `--d_model` | 512 | 腦區與 global transformer 寬度 |
+| `--n_filters` | 40 | temporal conv 輸出通道 |
+| `--n_spatial_filters` | None | spatial conv 輸出通道；None = 同 `n_filters`（原行為） |
+| `--temporal_kernel` | 200 | temporal conv kernel 長度 |
+| `--pool_stride` | 50 | 原始時間軸 AvgPool kernel |
+| `--tokens_per_view` | 64 | adaptive pooling 後每腦區 local token 數 |
+| `--n_cls_per_view` | 8 | 每腦區 CLS token 數 |
+| `--n_heads` | 8 | attention heads（local 與 global 共用） |
+| `--n_encoder_layers` | 4 | 每腦區 transformer 層數 |
+| `--n_global_layers` | 3 | global transformer 層數 |
+| `--dropout` | 0.1 | encoder 與 transformer 內部 dropout |
+| `--lr_lora` | None | STEP 2 LoRA 絕對學習率；None = 沿用 `LR2 × 2.0` |
+| `--save_suffix` | `''` | 附加到 `save_name`，避免只差 `lora_r` 或架構的兩次 run 互相覆蓋 |
+
+`eval_multiview.py` 改為從訓練寫出的 `config/decoding/<save_name>.json` 讀回幾何
+參數，evaluation 不可能再與訓練不一致。舊的 config 沒有這些欄位時會退回上表預設值。
+
+### 與 SNN t=4 對齊的 ANN run
+
+`scripts/train_multiview_snn_matched.bat` 把 ANN 的每一個超參數對齊
+`Spiking-EEG2TEXT/configs/multiview_snn_v2.json`（SNN 是錨點，完全不動；ANN 縮小
+去對齊），架構與序列長度同時受控：
+
+```
+--d_model 256 --n_filters 64 --n_spatial_filters 32 --temporal_kernel 250
+--pool_stride 100 --tokens_per_view 32 --n_cls_per_view 4
+--n_encoder_layers 2 --n_global_layers 2 -lr2 0.000005 --lr_lora 0.0001 --lora_r 8
+```
+
+實測 encoder 側參數量：ANN 18,119,808 vs SNN 19,158,656（ANN 少 5.4%），
+進 BART 的序列兩邊都是 10×(4+32)=360 token。殘餘 5.4% 是結構差異而非超參數差異：
+SNN 每個腦區多了可學的 `positional_embedding` 與 `before_transformer_linear`，
+ANN 的 `PositionalEncoding` 是無參數的 sinusoidal，projection 也直接接到 `d_model`。
+細節見 `version.md`。
+
+> **注意**：`checkpoints/pretrain/encoder_best.pt` 是舊幾何訓練出來的，載不進這個
+> 模型。`load_pretrained_encoder` 會逐一跳過形狀不符的張量並印出警告，STEP 1 等同
+> 從隨機初始化開始。要暖啟動就得先用同一組幾何重跑 ANN 的 MAE pre-training。
 
 ---
 

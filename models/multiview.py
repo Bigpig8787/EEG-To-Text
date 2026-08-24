@@ -26,10 +26,15 @@ class RegionalConformerEncoder(nn.Module):
     def __init__(self, n_channels, d_model=512, n_filters=40,
                  temporal_kernel=200, pool_stride=50,
                  tokens_per_view=64, n_cls_tokens=4,
-                 n_heads=8, n_transformer_layers=4, dropout=0.1):
+                 n_heads=8, n_transformer_layers=4, dropout=0.1,
+                 n_spatial_filters=None):
         super().__init__()
         self.tokens_per_view = tokens_per_view
         self.n_cls_tokens = n_cls_tokens
+        # The spatial conv used to be locked to n_filters. Keeping it separate lets
+        # the stem widen then narrow (1 -> n_filters -> n_spatial_filters), which is
+        # what the SNN's SpikeEncoder1T1S does with its 3-tuple `dim`.
+        n_spatial_filters = n_filters if n_spatial_filters is None else n_spatial_filters
 
         self.temporal_conv = nn.Sequential(
             nn.Conv2d(1, n_filters, kernel_size=(1, temporal_kernel),
@@ -37,14 +42,14 @@ class RegionalConformerEncoder(nn.Module):
             nn.BatchNorm2d(n_filters),
         )
         self.spatial_conv = nn.Sequential(
-            nn.Conv2d(n_filters, n_filters, kernel_size=(n_channels, 1), bias=False),
-            nn.BatchNorm2d(n_filters),
+            nn.Conv2d(n_filters, n_spatial_filters, kernel_size=(n_channels, 1), bias=False),
+            nn.BatchNorm2d(n_spatial_filters),
             nn.ELU(),
         )
         self.pool = nn.AvgPool2d(kernel_size=(1, pool_stride))
         self.dropout1 = nn.Dropout(dropout)
         self.adaptive_pool = nn.AdaptiveAvgPool1d(tokens_per_view)
-        self.projection = nn.Linear(n_filters, d_model)
+        self.projection = nn.Linear(n_spatial_filters, d_model)
 
         self.cls_token = nn.Parameter(torch.zeros(1, n_cls_tokens, d_model))
         nn.init.trunc_normal_(self.cls_token, std=0.02)
@@ -100,7 +105,7 @@ class MultiViewConformerTranslator(BaseEEGModel):
                  tokens_per_view=64, n_cls_per_view=4,
                  n_heads=8, n_encoder_layers=4,
                  n_global_layers=3, dropout=0.1,
-                 decoder_embedding_size=1024):
+                 decoder_embedding_size=1024, n_spatial_filters=None):
         super().__init__()
         self.tokens_per_view = tokens_per_view
         self.n_cls_per_view = n_cls_per_view
@@ -113,6 +118,7 @@ class MultiViewConformerTranslator(BaseEEGModel):
                 tokens_per_view=tokens_per_view, n_cls_tokens=n_cls_per_view,
                 n_heads=n_heads,
                 n_transformer_layers=n_encoder_layers, dropout=dropout,
+                n_spatial_filters=n_spatial_filters,
             )
             for region, ch_count in BRAIN_REGION_CHANNEL_COUNT.items()
         })
@@ -165,20 +171,34 @@ class MultiViewConformerTranslator(BaseEEGModel):
         trans_w = {k: v for k, v in state.items() if k.startswith('transformer.')}
 
         count = 0
+        skipped = 0
         for region, encoder in self.view_encoders.items():
             es = encoder.state_dict()
             for k, v in temporal_w.items():
-                if k in es:
+                # Shape check, same as the proj/transformer loops below. Without it a
+                # checkpoint trained at a different n_filters or temporal_kernel makes
+                # load_state_dict raise instead of falling back to random init.
+                if k in es and es[k].shape == v.shape:
                     es[k] = v; count += 1
+                elif k in es:
+                    skipped += 1
             for k, v in proj_w.items():
                 if k in es and es[k].shape == v.shape:
                     es[k] = v; count += 1
+                elif k in es:
+                    skipped += 1
             for k, v in trans_w.items():
                 if k in es and es[k].shape == v.shape:
                     es[k] = v; count += 1
+                elif k in es:
+                    skipped += 1
             encoder.load_state_dict(es)
 
         print(f'  Loaded {count} params across {len(self.view_encoders)} encoders')
+        if skipped:
+            print(f'  [WARN] {skipped} tensors skipped on shape mismatch — the checkpoint '
+                  f'was trained at a different geometry; those layers stay randomly '
+                  f'initialised. Re-run MAE pre-training to match.')
 
     def set_active_views(self, n_active=3):
         """Randomly freeze 7, unfreeze 3 view encoders. Returns active names."""

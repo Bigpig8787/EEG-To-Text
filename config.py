@@ -40,6 +40,42 @@ def get_config(case):
                             default=['q_proj', 'k_proj', 'v_proj', 'out_proj'])
         parser.add_argument('-label_smooth', '--label_smooth', type=float,
                             help='label smoothing epsilon (0=off)', default=0.1)
+        parser.add_argument('-lr_lora', '--lr_lora', type=float, default=None,
+                            help='absolute LoRA learning rate in step 2; None keeps the '
+                                 'historical LR2*2.0 coupling')
+        parser.add_argument('-suffix', '--save_suffix', type=str, default='',
+                            help='extra suffix appended to save_name; use it to keep runs that '
+                                 'differ only in a parameter absent from save_name (e.g. lora_r '
+                                 'or the architecture) from overwriting each other in '
+                                 'config/decoding/')
+
+        # ── MultiViewConformerTranslator architecture ────────────────────────
+        # Every default reproduces the geometry that used to be hard-coded in
+        # train_multiview.py and eval_multiview.py, so existing scripts build
+        # exactly the same model they always did.
+        parser.add_argument('-d_model', '--d_model', type=int, default=512,
+                            help='width of the per-region and global transformers')
+        parser.add_argument('-n_filters', '--n_filters', type=int, default=40,
+                            help='temporal conv output channels')
+        parser.add_argument('-n_spatial_filters', '--n_spatial_filters', type=int, default=None,
+                            help='spatial conv output channels; None = same as n_filters '
+                                 '(the historical behaviour)')
+        parser.add_argument('-tk', '--temporal_kernel', type=int, default=200,
+                            help='temporal conv kernel length')
+        parser.add_argument('-pool', '--pool_stride', type=int, default=50,
+                            help='AvgPool kernel over the raw time axis')
+        parser.add_argument('-tpv', '--tokens_per_view', type=int, default=64,
+                            help='local tokens per region after adaptive pooling')
+        parser.add_argument('-cls', '--n_cls_per_view', type=int, default=8,
+                            help='CLS tokens per region')
+        parser.add_argument('-heads', '--n_heads', type=int, default=8,
+                            help='attention heads, local and global')
+        parser.add_argument('-enc_layers', '--n_encoder_layers', type=int, default=4,
+                            help='per-region transformer depth')
+        parser.add_argument('-glob_layers', '--n_global_layers', type=int, default=3,
+                            help='global transformer depth')
+        parser.add_argument('-dropout', '--dropout', type=float, default=0.1,
+                            help='dropout inside the encoders and transformers')
 
         parser.add_argument('-s', '--save_path', help='checkpoint save path', default = './checkpoints/decoding', required=True)
         parser.add_argument('-subj', '--subjects', help='use all subjects or specify a particular one', default = 'ALL', required=False)

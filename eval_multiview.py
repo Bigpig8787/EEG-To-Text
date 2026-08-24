@@ -102,9 +102,22 @@ if __name__ == '__main__':
 
     # model
     bart = BartForConditionalGeneration.from_pretrained('facebook/bart-large')
-    model = MultiViewConformerTranslator(bart, d_model=512, n_filters=40, temporal_kernel=200,
-                                         pool_stride=50, tokens_per_view=64, n_cls_per_view=8, n_heads=8,
-                                         n_encoder_layers=4, n_global_layers=3, decoder_embedding_size=1024)
+    # Geometry comes from the training config so eval can never drift from training.
+    # The fallbacks are the values that used to be hard-coded here, so configs written
+    # before the architecture became configurable still build the right model.
+    model = MultiViewConformerTranslator(
+        bart,
+        d_model=config.get('d_model', 512),
+        n_filters=config.get('n_filters', 40),
+        n_spatial_filters=config.get('n_spatial_filters'),
+        temporal_kernel=config.get('temporal_kernel', 200),
+        pool_stride=config.get('pool_stride', 50),
+        tokens_per_view=config.get('tokens_per_view', 64),
+        n_cls_per_view=config.get('n_cls_per_view', 8),
+        n_heads=config.get('n_heads', 8),
+        n_encoder_layers=config.get('n_encoder_layers', 4),
+        n_global_layers=config.get('n_global_layers', 3),
+        decoder_embedding_size=1024)
     model.load_state_dict(torch.load(args['checkpoint_path'], map_location=device))
     model.to(device)
 

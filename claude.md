@@ -169,15 +169,24 @@ Runs 4 combinations: teacher_forcing × noise. Main result = free generation + r
 ### train_multiview.py
 The main training script. Key features:
 - LoRA applied to BART q_proj and v_proj (only 2.3M BART params trainable)
-- 3 param groups with different lr: encoder_lr > other_lr (0.5x) > lora_lr (0.1x)
+- 3 param groups with different lr: encoder_lr > other_lr (0.5x) > lora_lr (0.1x).
+  `--lr_lora` overrides the LoRA group with an absolute LR instead of a multiple of LR2.
 - Mixed precision (AMP) with GradScaler
 - Warmup 10% + cosine decay scheduler
 - Gradient accumulation (batch=2, accum=2, effective=4)
 - Early stopping with patience=7
+- **The model geometry is no longer hard-coded here.** `--d_model`, `--n_filters`,
+  `--n_spatial_filters`, `--temporal_kernel`, `--pool_stride`, `--tokens_per_view`,
+  `--n_cls_per_view`, `--n_heads`, `--n_encoder_layers`, `--n_global_layers` and
+  `--dropout` all come from `config.py`, with defaults equal to the old literals.
+  `eval_multiview.py` reads them back from `config/decoding/<save_name>.json`, so
+  eval geometry always follows training. `--save_suffix` keeps runs apart when they
+  differ only in `lora_r` or the architecture, neither of which is in `save_name`.
 
 ### models/multiview.py
 The model. Key methods:
-- `load_pretrained_encoder()`: loads temporal conv + projection + transformer from pre-trained weights. Spatial conv stays random (different channel counts per region).
+- `load_pretrained_encoder()`: loads temporal conv + projection + transformer from pre-trained weights. Spatial conv stays random (different channel counts per region). Every tensor is shape-checked; a checkpoint from a different geometry is skipped with a warning rather than crashing `load_state_dict`.
+- `RegionalConformerEncoder(n_spatial_filters=...)`: lets the conv stem widen then narrow (1 → `n_filters` → `n_spatial_filters`). `None` keeps the old behaviour where both convs share `n_filters`.
 - `set_active_views(n)`: freeze/unfreeze strategy (currently unused, all 10 train together)
 - `encode()`: 10 regional encoders → concat → global transformer → FC
 - `forward()`: encode → BART with cross-entropy loss
