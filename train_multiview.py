@@ -236,10 +236,6 @@ if __name__ == '__main__':
     save_suffix = '_cont' if RESUME else ''
     if NO_LORA:
         save_suffix += '_full'
-    # lora_r is not part of save_name, so two runs that differ only in rank would
-    # overwrite each other's config/decoding/<save_name>.json. --save_suffix keeps
-    # them apart without renaming any existing run.
-    save_suffix += args.get('save_suffix', '') or ''
     save_name = f'{TASK_NAME}_multiview_2step_b{BATCH_SIZE}_{STEP1_EPOCHS}_{STEP2_EPOCHS}_{LR1}_{LR2}_unique_sent{save_suffix}'
 
     np.random.seed(312)

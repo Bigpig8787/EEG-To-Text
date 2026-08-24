@@ -1,44 +1,5 @@
 # Version Log — EEG-To-Text Multi-View Conformer
 
-## 2026-08-23 — LoRA r=8 run for the parameter-matched ANN-vs-SNN comparison
-
-**Why.** The existing ANN-vs-SNN comparison confounds two variables: the SNN's
-encoder is ~7× smaller *and* it feeds BART half as many tokens. The new
-experiment holds sequence length fixed and matches parameter count only. The
-ANN is the anchor — its architecture does not change — and the SNN was scaled up
-to meet it (`Spiking-EEG2TEXT/configs/multiview_snn_match_ann.json`).
-
-**Measured budgets** (BART-large = 406,291,456, identical on both sides; LoRA
-r=8 on q/k/v/out_proj covers 144 Linear layers = 2,359,296, identical on both
-sides):
-
-| | encoder side | trainable | TOTAL |
-|---|---|---|---|
-| ANN d=512, 4 enc / 3 global | 136,619,264 | 138,978,560 | 542,910,720 |
-| SNN matched d=512, 4/3 | 140,107,904 | 142,467,200 | 546,399,360 |
-
-+2.6% on the SNN side, from its extra `before_transformer_linear`, the U-readout
-projection, and the per-LIF LayerNorms.
-
-Within the ANN, `view_encoders` is 23.32% of all parameters and BART 74.84%;
-inside one regional encoder the 4-layer transformer is 99.4% and the whole conv
-stem under 0.6%. Changing `n_filters` or `temporal_kernel` is therefore useless
-for parameter matching — only `d_model` and layer count move the number.
-
-**What changed.**
-
-- `config.py` — new `-suffix` / `--save_suffix` argument (default `''`).
-- `train_multiview.py` — appends it to `save_suffix`. `save_name` does not
-  include `lora_r`, so an r=8 run would otherwise overwrite the r=16 run's
-  `config/decoding/<save_name>.json`. No existing run name changes.
-- `scripts/train_multiview_lora_r8.bat` — new. Identical to
-  `train_multiview.bat` except `--lora_r 8`, `--save_suffix _r8`, and
-  `-s ./checkpoints/multiview_lora_r8`.
-
-**Ordering.** One GPU, so this run must not overlap the SNN pipeline. The SNN
-needs a fresh MAE pre-training first (its old encoder checkpoint is the wrong
-shape), so the SNN side starts and this run is queued behind it.
-
 ## 2026-07-29 — MAE pre-training rewritten to match the SNN encoder
 
 **Bug: pre-training was learning from an empty sequence.**
