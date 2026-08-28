@@ -122,6 +122,11 @@ if __name__ == '__main__':
     model.to(device)
 
     os.makedirs('./results', exist_ok=True)
-    tag = f'{task_name}-multiview{"_tf" if teacher_forcing else ""}{"_noise" if input_noise else ""}'
+    # save_suffix must be part of the tag: neither lora_r nor the architecture appears
+    # in task_name, so two runs that differ only in those wrote to the same results
+    # files and the second silently overwrote the first.
+    suffix = config.get('save_suffix', '') or ''
+    tag = (f'{task_name}-multiview{suffix}'
+           f'{"_tf" if teacher_forcing else ""}{"_noise" if input_noise else ""}')
     eval_model(dataloaders, device, tokenizer, model, teacher_forcing, input_noise,
                f'./results/{tag}_results.txt', f'./results/{tag}_metrics.json')

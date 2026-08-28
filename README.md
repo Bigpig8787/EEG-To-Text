@@ -284,9 +284,13 @@ python eval_multiview.py \
     -tf True -n False -cuda cuda:0
 ```
 
-輸出：
-- `results/{task}_results.txt` — 預測 vs. 答案
-- `results/{task}_metrics.json` — WER / BLEU-1~4 / ROUGE
+輸出（`{suffix}` = 訓練時的 `--save_suffix`，從 config JSON 讀）：
+- `results/{task}-multiview{suffix}[_tf][_noise]_results.txt` — 預測 vs. 答案
+- `results/{task}-multiview{suffix}[_tf][_noise]_metrics.json` — WER / BLEU-1~4 / ROUGE
+
+`task_name` 不含 `lora_r` 也不含架構，所以只差這兩者的 run 以前會覆蓋彼此的
+results 檔；`{suffix}` 進 tag 之後才分得開。舊 config JSON 沒有 `save_suffix`
+這個 key，`.get` 回空字串，檔名與過去完全相同。
 
 ### 5. 完整 Pipeline（一鍵）
 

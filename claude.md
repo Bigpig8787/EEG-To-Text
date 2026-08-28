@@ -239,6 +239,18 @@ anything trained after it.** Pre-trained encoder weights:
 7. Old *full-model* pre-train checkpoints no longer load with `strict=True` —
    `ConformerDecoder` gained `mask_token` and `latent_pos` on 2026-07-29.
    Encoder-only checkpoints are unaffected.
+8. The `-n True` noise control replaces every view with `torch.rand_like`, i.e.
+   uniform [0,1). Real EEG is roughly zero-mean with both signs, so this is an
+   out-of-distribution input rather than an information-free one — a collapse
+   under it is weaker evidence that the model uses EEG than a distribution-
+   preserving control (EEG shuffled across sentences) would be. The SNN side
+   uses the same `rand_like`, so ANN-vs-SNN comparison stays fair;
+   `EEGSNN/compare/compare_ann_snn_noise.py` has the stricter partial-replace
+   control but it is not wired into the main eval.
+9. Teacher-forcing metrics are computed from `argmax` over gold-conditioned
+   logits, and pad positions are decoded into the prediction string as well.
+   They are an upper bound on the LM, not evidence of EEG→text decoding. Report
+   free generation + real EEG only.
 
 ## References
 - Wang, Z. and Ji, H. (2021). Open vocabulary EEG-to-text decoding and zero-shot sentiment classification.

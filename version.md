@@ -1,5 +1,67 @@
 # Version Log — EEG-To-Text Multi-View Conformer
 
+## 2026-08-28 — eval results no longer overwrite each other; eval caveats written down
+
+**Bug: two runs wrote to the same results files.** `eval_multiview.py` built its
+output tag from `task_name` alone:
+
+```python
+tag = f'{task_name}-multiview{"_tf" if teacher_forcing else ""}{"_noise" if input_noise else ""}'
+```
+
+`task_name` contains neither `lora_r` nor the architecture, so the SNN-matched
+run and the legacy run produced the identical
+`results/task1_..._taskTSRv2-multiview_results.txt` and the second one silently
+overwrote the first. `save_name` got `--save_suffix` when the architecture became
+configurable; the results tag was missed.
+
+The tag now carries the suffix, read back out of the training config JSON
+(`json.dump(args)` already stores it):
+
+```python
+suffix = config.get('save_suffix', '') or ''
+tag = (f'{task_name}-multiview{suffix}'
+       f'{"_tf" if teacher_forcing else ""}{"_noise" if input_noise else ""}')
+```
+
+Verified for all four `tf x noise` combinations: the matched run now writes
+`..._taskTSRv2-multiview_snnmatch[_tf][_noise]_metrics.json`, and both an empty
+suffix and a pre-existing config JSON that has no `save_suffix` key reproduce the
+old filenames byte for byte. `python -m py_compile eval_multiview.py` passes.
+No `.bat` change — the eval script reads the suffix itself.
+
+**How scoring actually works** (`metrics.py`, unchanged, shared with the SNN):
+
+| metric | how | scale |
+|---|---|---|
+| `wer` | `torchmetrics.WordErrorRate`, corpus level | 0-1 |
+| `rouge1/2/L x f/p/r` | `rouge_score` per sentence, averaged, `/len*100` | **0-100** |
+| `bleu-1..4` | `torchmetrics.BLEUScore(n_gram=i)`, corpus level, single reference | **0-1** |
+
+ROUGE is scaled by 100 and BLEU is not. Not a bug, but the two live in the same
+JSON.
+
+**ANN-vs-SNN scoring is comparable.** `EEGSNN/eval_multiview_snn.py` imports this
+repo's `metrics.py`, uses the same generation kwargs (beam 5, `max_new_tokens=50`,
+`repetition_penalty=1.5`, `no_repeat_ngram_size=3`, `forced_bos_token_id`), the
+same seed 312, `batch_size=1`, `shuffle=False`, the `unique_sent` test split and
+the same ZuCo pickles. The remaining differences between the two runs are on the
+training side only (the cold-start encoder and `--dropout`, both noted in the
+2026-08-25 entry).
+
+**Two eval caveats that are NOT fixed**, now recorded in `claude.md` Known Issues
+8 and 9:
+
+- `-n True` replaces every view with `torch.rand_like`, uniform [0,1). Real EEG is
+  roughly zero-mean with both signs, so this is an out-of-distribution input, not
+  an information-free one. A distribution-preserving control — EEG shuffled
+  across sentences — would be stronger evidence. Both sides use the same
+  `rand_like`, so the comparison itself stays fair.
+- Teacher-forcing metrics come from `argmax` over gold-conditioned logits, with
+  pad positions decoded into the prediction string too. Upper bound on BART's LM,
+  not evidence of EEG decoding. Only free generation + real EEG belongs in the
+  report.
+
 ## 2026-08-25 — architecture made configurable; ANN run matched to the SNN t=4 baseline
 
 **Context.** An earlier attempt (commit `1661006`, reverted in `837d92a`) scaled
