@@ -251,6 +251,24 @@ anything trained after it.** Pre-trained encoder weights:
    logits, and pad positions are decoded into the prediction string as well.
    They are an upper bound on the LM, not evidence of EEG→text decoding. Report
    free generation + real EEG only.
+10. **An interrupted STEP 2 leaves a checkpoint eval cannot load.**
+   `get_peft_model()` is applied at `train_multiview.py:404`, before STEP 2
+   trains, so every mid-loop save carries `lora_A`/`lora_B` keys. The plain
+   `_merged.pt` that `eval_multiview.py` needs is only written *after* the STEP 2
+   epoch loop returns (`:459`/`:465`). Ctrl+C or a crash anywhere in STEP 2 and
+   eval fails with `FileNotFoundError` on `..._merged.pt`.
+   Recover with `python merge_lora_ckpt.py --config_path config/decoding/<run>.json
+   --checkpoint_path checkpoints/<run>/best/<save_name>.pt` (or
+   `scripts\merge_lora_ckpt_snn_matched.bat` for the SNN-matched run).
+   Diagnose which step died by which files exist: `last/<run>_s1.pt` present
+   means STEP 1 completed; `last/<run>.pt` absent means STEP 2 did not.
+   ⚠️ A merged checkpoint is only as good as the best epoch reached before the
+   interruption — check `train.log` for the STEP 2 epoch count before comparing
+   it against a fully trained SNN.
+11. `scripts\train_multiview_snn_matched.bat` passes
+   `--not_load_step1_checkpoint`. `config.py:27` defines the flag, but
+   `train_multiview.py` never reads `load_step1_checkpoint` — it does nothing in
+   this script.
 
 ## References
 - Wang, Z. and Ji, H. (2021). Open vocabulary EEG-to-text decoding and zero-shot sentiment classification.

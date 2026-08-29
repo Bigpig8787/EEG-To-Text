@@ -1,5 +1,72 @@
 # Version Log — EEG-To-Text Multi-View Conformer
 
+## 2026-08-29 — an interrupted STEP 2 run can be recovered instead of retrained
+
+**Symptom.** `scripts\eval_multiview_snn_matched.bat` failed on all four
+tf×noise combinations with
+
+```
+FileNotFoundError: ./checkpoints/multiview_snn_matched/best/..._unique_sent_snnmatch_merged.pt
+```
+
+**Not a naming bug.** `save_name` (`train_multiview.py:257`) → `ckpt_best`
+(`:350`) → `merged_path = ckpt_best.replace('.pt', '_merged.pt')` (`:459`)
+produces exactly the path the eval script asks for.
+
+**Root cause: STEP 2 never finished, so `_merged.pt` was never written.**
+The evidence is in which files exist:
+
+| file | written by | when |
+|---|---|---|
+| `best/<run>_s1.pt` | STEP 1 | every val improvement (`:187`) |
+| `last/<run>_s1.pt` | STEP 1 | after the epoch loop returns (`:202`) — present, so STEP 1 completed |
+| `best/<run>.pt` | STEP 2 | every val improvement — present, so STEP 2 ran and improved |
+| `last/<run>.pt` | STEP 2 | after the epoch loop returns — **absent**, so STEP 2 was interrupted |
+| `best/<run>_merged.pt` | after the loop (`:459`) | consequently never written |
+
+The traceback line number confirms it independently: eval died at
+`eval_multiview.py:121` (`load_state_dict`), which means `:74`
+(`json.load(config_path)`) had already succeeded. That config is written at
+`train_multiview.py:296`, *before* training starts — so the run began but did
+not reach the end of STEP 2.
+
+**Why the stranded checkpoint cannot simply be evaluated.**
+`get_peft_model()` is applied at `:404`, before STEP 2 trains, so every mid-loop
+`torch.save(model.state_dict(), ...)` carries `lora_A` / `lora_B` keys.
+`eval_multiview.py` builds a plain `MultiViewConformerTranslator`, so
+`load_state_dict()` rejects them. Unlike the SNN repo (which has
+`EEGSNN/merge_lora_ckpt.py`), this repo had no standalone merge tool, so an
+interrupted STEP 2 meant retraining from scratch.
+
+**Added `merge_lora_ckpt.py` + `scripts/merge_lora_ckpt_snn_matched.bat`.**
+Rebuilds the model from `config/decoding/<save_name>.json` — the same file eval
+reads, so the geometry cannot drift — re-wraps BART with the same LoRA
+configuration, loads the stranded checkpoint, calls `merge_and_unload()`, and
+writes the `_merged.pt` name eval expects. Nothing is retrained.
+
+It refuses rather than writes when the result would be wrong:
+- unexpected keys → the config and the checkpoint are from different runs;
+- non-LoRA missing keys → merging would fill real weights with random init;
+- no `lora_*` keys at all → already plain, or a STEP 1 `_s1.pt` (which has no
+  trained BART to evaluate);
+- `no_lora: true` in the config → that run's checkpoints are already plain.
+
+`lora_alpha` and `lora_dropout` are not recorded in the config JSON because
+`train_multiview.py` derives them (`LORA_ALPHA = LORA_R` at `:228`, dropout
+hard-coded 0.15 at `:401`); the merge script uses the same defaults and exposes
+flags to override.
+
+**Caveat when using this for the ANN-vs-SNN comparison.** A merged checkpoint is
+only as good as the epoch that produced the best val loss before the
+interruption. Check `train.log` (truncated at the start of each training run,
+`:210`) for how many of the 70 STEP 2 epochs actually ran. A partially trained
+ANN compared against a fully trained SNN understates the ANN.
+
+**Unrelated observation.** `scripts\train_multiview_snn_matched.bat` passes
+`--not_load_step1_checkpoint`. `config.py:27` defines it, but
+`train_multiview.py` never reads `load_step1_checkpoint` — the flag does nothing
+in this script. Left as-is; noted so it is not mistaken for a control that works.
+
 ## 2026-08-28 — eval results no longer overwrite each other; eval caveats written down
 
 **Bug: two runs wrote to the same results files.** `eval_multiview.py` built its
