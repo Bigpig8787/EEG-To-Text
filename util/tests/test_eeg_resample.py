@@ -48,7 +48,7 @@ def test_equal_rates_are_identity():
 
 
 # ── 長度換算 ──────────────────────────────────────────────────────────
-@pytest.mark.parametrize('n_in,expected', [(5000, 2000), (4237, 1695), (1, 1)])
+@pytest.mark.parametrize('n_in,expected', [(5000, 2000), (4237, 1695), (731, 293), (1, 1)])
 def test_resampled_length_is_ceil_of_the_ratio(n_in, expected):
     assert resampled_length(n_in, 500, 200) == expected
 

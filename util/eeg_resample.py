@@ -21,7 +21,7 @@ DEFAULT_FS_IN = 500
 DEFAULT_FS_OUT = 200
 
 
-def resample_ratio(fs_in: int, fs_out: int) -> tuple:
+def resample_ratio(fs_in: int, fs_out: int) -> "tuple[int, int]":
     """回傳 `resample_poly` 要的 `(up, down)`，已約分到最簡分數。
 
     Args:
