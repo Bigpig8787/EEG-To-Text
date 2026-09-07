@@ -4,6 +4,7 @@
 """
 
 import os
+import pickle
 import sys
 
 import numpy as np
@@ -11,7 +12,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from resample_pickle import resample_dataset_dict, verify_report      # noqa: E402
+from resample_pickle import process_task, resample_dataset_dict, verify_report      # noqa: E402
 
 
 def _sent(n_samples=5000, with_raw=True):
@@ -109,3 +110,98 @@ def test_verify_report_shows_the_stopband_is_gone():
     after = resample_eeg(before, 500, 200)
     rep = verify_report(before, after, 500, 200)
     assert rep['band_ratio']['>100'] < 1e-3
+
+
+# ── 磁碟 I/O 層（process_task）───────────────────────────────────────
+# `resample_dataset_dict` 只碰記憶體裡的 dict，上面的測試都不會經過
+# `_pickle_paths` / `process_task` 實際讀寫檔案的路徑 —— 檔名樣板改壞、
+# 或 src/dst 寫反，都不會被上面任何一個測試抓到。這裡用 tmp_path 建一份
+# 假的 `dataset/ZuCo/<task>/pickle/` 目錄，走完整的讀 -> 重取樣 -> 寫流程。
+
+def _write_pickle(path, obj):
+    with open(path, 'wb') as handle:
+        pickle.dump(obj, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+
+def _make_task_pickle_dir(tmp_path, task_name, dataset_dict):
+    """在 `tmp_path` 下建出 `dataset/ZuCo/<task_name>/pickle/<task_name>-dataset.pickle`。"""
+    pickle_dir = tmp_path / 'dataset' / 'ZuCo' / task_name / 'pickle'
+    pickle_dir.mkdir(parents=True)
+    src_path = pickle_dir / f'{task_name}-dataset.pickle'
+    _write_pickle(src_path, dataset_dict)
+    return pickle_dir, src_path
+
+
+def test_process_task_writes_the_exact_contract_filename(tmp_path):
+    """輸出檔名是 Task 3 讀取的契約，故意寫死字串比對，不算 f-string。"""
+    task_name = 'task1-SR'
+    dataset = {'ZAB': [_sent(5000), None, _sent(731), _sent(5000, with_raw=False)]}
+    pickle_dir, _ = _make_task_pickle_dir(tmp_path, task_name, dataset)
+
+    process_task(task_name, 500, 200, verify=False, project_root=str(tmp_path))
+
+    expected_dst = pickle_dir / 'task1-SR-dataset-200hz.pickle'
+    assert expected_dst.exists()
+    # 目錄裡只該多這一個檔案，沒有暫存檔殘留
+    assert sorted(p.name for p in pickle_dir.iterdir()) == [
+        'task1-SR-dataset-200hz.pickle',
+        'task1-SR-dataset.pickle',
+    ]
+
+
+def test_process_task_leaves_the_source_pickle_byte_identical(tmp_path):
+    task_name = 'task1-SR'
+    dataset = {'ZAB': [_sent(5000)]}
+    _, src_path = _make_task_pickle_dir(tmp_path, task_name, dataset)
+    bytes_before = src_path.read_bytes()
+
+    process_task(task_name, 500, 200, verify=False, project_root=str(tmp_path))
+
+    assert src_path.read_bytes() == bytes_before
+
+
+def test_process_task_output_round_trips_to_resampled_shapes(tmp_path):
+    task_name = 'task1-SR'
+    dataset = {'ZAB': [_sent(5000), None, _sent(731), _sent(5000, with_raw=False)]}
+    pickle_dir, _ = _make_task_pickle_dir(tmp_path, task_name, dataset)
+
+    process_task(task_name, 500, 200, verify=False, project_root=str(tmp_path))
+
+    with open(pickle_dir / 'task1-SR-dataset-200hz.pickle', 'rb') as handle:
+        out = pickle.load(handle)
+
+    assert out['ZAB'][0]['rawData'].shape == (105, 2000)
+    assert out['ZAB'][0]['rawData'].dtype == np.float32
+    assert out['ZAB'][1] is None
+    assert out['ZAB'][2]['rawData'].shape == (105, 293)
+    assert 'rawData' not in out['ZAB'][3]
+
+
+def test_process_task_overwrite_leaves_no_temp_files_and_says_so(tmp_path, capsys):
+    """重跑一次現有輸出：印訊息要講清楚是覆寫，且不留下 `.tmp` 暫存檔。"""
+    task_name = 'task1-SR'
+    dataset = {'ZAB': [_sent(5000)]}
+    pickle_dir, _ = _make_task_pickle_dir(tmp_path, task_name, dataset)
+
+    process_task(task_name, 500, 200, verify=False, project_root=str(tmp_path))
+    capsys.readouterr()  # 丟掉第一次跑的輸出
+
+    process_task(task_name, 500, 200, verify=False, project_root=str(tmp_path))
+    captured = capsys.readouterr()
+
+    assert 'overwrote' in captured.out
+    assert sorted(p.name for p in pickle_dir.iterdir()) == [
+        'task1-SR-dataset-200hz.pickle',
+        'task1-SR-dataset.pickle',
+    ]
+
+
+def test_process_task_skips_a_missing_source_without_raising(tmp_path, capsys):
+    pickle_dir = tmp_path / 'dataset' / 'ZuCo' / 'task1-SR' / 'pickle'
+    pickle_dir.mkdir(parents=True)
+
+    process_task('task1-SR', 500, 200, verify=False, project_root=str(tmp_path))
+    captured = capsys.readouterr()
+
+    assert 'SKIP' in captured.out
+    assert list(pickle_dir.iterdir()) == []

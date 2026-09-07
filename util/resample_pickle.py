@@ -15,6 +15,7 @@
 import argparse
 import os
 import pickle
+import tempfile
 
 import numpy as np
 from scipy import signal
@@ -104,8 +105,13 @@ def verify_report(before: np.ndarray, after: np.ndarray,
     }
 
 
-def _pickle_paths(task_name: str, fs_out: int):
-    pickle_dir = os.path.join(PROJECT_ROOT, 'dataset', 'ZuCo', task_name, 'pickle')
+def _pickle_paths(task_name: str, fs_out: int, project_root: str = PROJECT_ROOT):
+    """算出 `task_name` 的來源/目的 pickle 路徑。
+
+    `project_root` 可覆寫（測試用合成的 tmp 目錄），預設是本檔案所在的
+    `EEG-To-Text/` repo 根目錄。
+    """
+    pickle_dir = os.path.join(project_root, 'dataset', 'ZuCo', task_name, 'pickle')
     src = os.path.join(pickle_dir, f'{task_name}-dataset.pickle')
     dst = os.path.join(pickle_dir, f'{task_name}-dataset-{fs_out}hz.pickle')
     return src, dst
@@ -120,8 +126,41 @@ def _first_raw(dataset_dict):
     return None
 
 
-def process_task(task_name: str, fs_in: int, fs_out: int, verify: bool) -> None:
-    src, dst = _pickle_paths(task_name, fs_out)
+def _atomic_pickle_dump(obj, dst: str) -> None:
+    """把 `obj` 寫進 `dst`，中途失敗不會在 `dst` 留下半成品檔案。
+
+    直接 `open(dst, 'wb')` 一開檔就把舊檔案截斷了 —— 幾 GB 的 dump 跑到一半
+    當機或被中斷，`dst` 這個路徑上就會躺著一個讀不回來的殘缺 pickle，而且
+    檔名跟正常輸出一模一樣，沒有任何標記說它是壞的。
+
+    改成先寫到同一個目錄下的暫存檔，dump 完全成功才用 `os.replace` 換過去
+    （`os.replace` 只在同一個檔案系統內才是原子操作，所以暫存檔必須跟
+    `dst` 同目錄，不能放到系統預設的 temp 資料夾）。dump 途中若拋例外，
+    暫存檔會被刪掉，不會留垃圾在資料夾裡。
+    """
+    directory = os.path.dirname(dst) or '.'
+    fd, tmp_path = tempfile.mkstemp(
+        dir=directory, prefix=os.path.basename(dst) + '.', suffix='.tmp')
+    try:
+        with os.fdopen(fd, 'wb') as handle:
+            pickle.dump(obj, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        os.replace(tmp_path, dst)
+    except BaseException:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise
+
+
+def process_task(task_name: str, fs_in: int, fs_out: int, verify: bool,
+                 project_root: str = PROJECT_ROOT) -> None:
+    src, dst = _pickle_paths(task_name, fs_out, project_root)
+    if dst == src:
+        # 不該發生：`_pickle_paths` 的 dst 一定帶 `-{fs_out}hz` 後綴。留這道檢查是
+        # 因為一旦這裡的路徑樣板被改壞，後果是原始資料被覆寫，代價太高不能只靠測試擋。
+        raise RuntimeError(
+            f'{task_name}: resolved destination equals source ({dst}); '
+            f'refusing to write, this would destroy the original pickle')
+
     if not os.path.exists(src):
         print(f'[SKIP] {task_name}: not found -> {src}')
         return
@@ -144,9 +183,10 @@ def process_task(task_name: str, fs_in: int, fs_out: int, verify: bool) -> None:
             flag = '  <- must be ~0' if name == '>100' else ''
             print(f'  band {name:>7}: {ratio:.6f}{flag}')
 
-    with open(dst, 'wb') as handle:
-        pickle.dump(out, handle, protocol=pickle.HIGHEST_PROTOCOL)
-    print(f'[{task_name}] saved {dst}')
+    existed_before = os.path.exists(dst)
+    _atomic_pickle_dump(out, dst)
+    verb = 'overwrote' if existed_before else 'saved'
+    print(f'[{task_name}] {verb} {dst}')
 
 
 def main():
