@@ -205,3 +205,41 @@ def test_process_task_skips_a_missing_source_without_raising(tmp_path, capsys):
 
     assert 'SKIP' in captured.out
     assert list(pickle_dir.iterdir()) == []
+
+
+def test_a_crash_mid_dump_leaves_the_existing_output_untouched(tmp_path, monkeypatch):
+    """原子寫入的迴歸測試：dump 中途爆掉，`dst` 必須維持上一次的完整內容。
+
+    這是當初要求原子寫入的那個性質本身。少了這個測試，把 `_atomic_pickle_dump`
+    改回直接 `open(dst, 'wb')` 也照樣全部綠燈 —— 真實資料是幾 GB 的 pickle，
+    一次中斷就會在 Task 3 要讀的檔名上留一個讀不回來的殘檔。
+    """
+    import resample_pickle
+
+    task_name = 'task1-SR'
+    dataset = {'ZAB': [_sent(5000)]}
+    pickle_dir, _ = _make_task_pickle_dir(tmp_path, task_name, dataset)
+
+    # 先跑一次成功的，讓 dst 有一份完整內容
+    process_task(task_name, 500, 200, verify=False, project_root=str(tmp_path))
+    dst_path = pickle_dir / 'task1-SR-dataset-200hz.pickle'
+    good_bytes = dst_path.read_bytes()
+
+    def _explode(obj, handle, protocol=None):
+        handle.write(b'partial garbage')   # 已經寫了一些，才中斷
+        raise KeyboardInterrupt('simulated Ctrl+C mid-dump')
+
+    monkeypatch.setattr(resample_pickle.pickle, 'dump', _explode)
+
+    with pytest.raises(KeyboardInterrupt):
+        process_task(task_name, 500, 200, verify=False, project_root=str(tmp_path))
+
+    # dst 沒被截斷，仍然是上一次那份，且能正常讀回
+    assert dst_path.read_bytes() == good_bytes
+    with open(dst_path, 'rb') as handle:
+        assert pickle.load(handle)['ZAB'][0]['rawData'].shape == (105, 2000)
+    # 暫存檔沒有留下來
+    assert sorted(p.name for p in pickle_dir.iterdir()) == [
+        'task1-SR-dataset-200hz.pickle',
+        'task1-SR-dataset.pickle',
+    ]
