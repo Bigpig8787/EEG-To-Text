@@ -5,11 +5,12 @@ import torch
 from torch.utils.data import Dataset
 import pickle
 
-RAW_EEG_MAX_LEN = 5000
+from data.dataset import RAW_EEG_MAX_LEN
 
 
 class EEGPretrainDataset(Dataset):
-    def __init__(self, pickle_paths, split='all'):
+    def __init__(self, pickle_paths, split='all', raw_eeg_max_len=RAW_EEG_MAX_LEN):
+        self.raw_eeg_max_len = int(raw_eeg_max_len)
         self.samples = []
         for path in pickle_paths:
             print(f'[PretrainDataset] loading {path}')
@@ -49,15 +50,16 @@ class EEGPretrainDataset(Dataset):
     def __getitem__(self, idx):
         raw = self.samples[idx]
         T = raw.shape[1]
+        max_len = self.raw_eeg_max_len
 
-        if T < RAW_EEG_MAX_LEN:
-            padded = np.zeros((105, RAW_EEG_MAX_LEN), dtype=np.float32)
+        if T < max_len:
+            padded = np.zeros((105, max_len), dtype=np.float32)
             padded[:, :T] = raw
             raw = padded
             actual_len = T
-        elif T > RAW_EEG_MAX_LEN:
-            raw = raw[:, :RAW_EEG_MAX_LEN].copy()
-            actual_len = RAW_EEG_MAX_LEN
+        elif T > max_len:
+            raw = raw[:, :max_len].copy()
+            actual_len = max_len
         else:
             raw = raw.copy()
             actual_len = T

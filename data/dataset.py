@@ -22,7 +22,8 @@ def normalize_1d(input_tensor):
 
 def get_input_sample(sent_obj, tokenizer, eeg_type='GD',
                      bands=('_t1','_t2','_a1','_a2','_b1','_b2','_g1','_g2'),
-                     max_len=56, add_CLS_token=False):
+                     max_len=56, add_CLS_token=False,
+                     raw_eeg_max_len=RAW_EEG_MAX_LEN):
 
     def get_word_embedding_eeg_tensor(word_obj, eeg_type, bands):
         expected = 105 * len(bands)
@@ -110,13 +111,13 @@ def get_input_sample(sent_obj, tokenizer, eeg_type='GD',
     if raw is not None:
         raw_eeg = np.nan_to_num(raw, nan=0.0, posinf=0.0, neginf=0.0)
         T = raw_eeg.shape[1]
-        actual_T = min(T, RAW_EEG_MAX_LEN)
-        if T < RAW_EEG_MAX_LEN:
-            padded = np.zeros((105, RAW_EEG_MAX_LEN), dtype=np.float32)
+        actual_T = min(T, raw_eeg_max_len)
+        if T < raw_eeg_max_len:
+            padded = np.zeros((105, raw_eeg_max_len), dtype=np.float32)
             padded[:, :T] = raw_eeg
             raw_eeg = padded
-        elif T > RAW_EEG_MAX_LEN:
-            raw_eeg = raw_eeg[:, :RAW_EEG_MAX_LEN]
+        elif T > raw_eeg_max_len:
+            raw_eeg = raw_eeg[:, :raw_eeg_max_len]
 
         raw_eeg = raw_eeg.astype(np.float32)
         mean = raw_eeg.mean(axis=1, keepdims=True)
@@ -131,7 +132,7 @@ def get_input_sample(sent_obj, tokenizer, eeg_type='GD',
         input_sample['raw_eeg_len'] = actual_T
     else:
         input_sample['raw_eeg_views'] = {
-            region: torch.zeros(ch_count, RAW_EEG_MAX_LEN, dtype=torch.float32)
+            region: torch.zeros(ch_count, raw_eeg_max_len, dtype=torch.float32)
             for region, ch_count in BRAIN_REGION_CHANNEL_COUNT.items()
         }
         input_sample['raw_eeg_len'] = 0
@@ -142,9 +143,11 @@ def get_input_sample(sent_obj, tokenizer, eeg_type='GD',
 class ZuCo_dataset(Dataset):
     def __init__(self, input_dataset_dicts, phase, tokenizer, subject='ALL',
                  eeg_type='GD', bands=('_t1','_t2','_a1','_a2','_b1','_b2','_g1','_g2'),
-                 setting='unique_sent', is_add_CLS_token=False):
+                 setting='unique_sent', is_add_CLS_token=False,
+                 raw_eeg_max_len=RAW_EEG_MAX_LEN):
         self.inputs = []
         self.tokenizer = tokenizer
+        self.raw_eeg_max_len = raw_eeg_max_len
 
         if not isinstance(input_dataset_dicts, list):
             input_dataset_dicts = [input_dataset_dicts]
@@ -181,7 +184,9 @@ class ZuCo_dataset(Dataset):
             for key in subjects:
                 for i in idx_range:
                     sample = get_input_sample(input_dataset_dict[key][i], self.tokenizer,
-                                              eeg_type, bands=bands, add_CLS_token=is_add_CLS_token)
+                                              eeg_type, bands=bands,
+                                              add_CLS_token=is_add_CLS_token,
+                                              raw_eeg_max_len=raw_eeg_max_len)
                     if sample is not None:
                         self.inputs.append(sample)
 

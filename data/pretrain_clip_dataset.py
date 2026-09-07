@@ -9,7 +9,7 @@ import torch
 from torch.utils.data import Dataset
 import pickle
 
-RAW_EEG_MAX_LEN = 5000
+from data.dataset import RAW_EEG_MAX_LEN
 
 
 class EEGPretrainCLIPDataset(Dataset):
