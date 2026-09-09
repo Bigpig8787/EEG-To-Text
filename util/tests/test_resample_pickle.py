@@ -243,3 +243,25 @@ def test_a_crash_mid_dump_leaves_the_existing_output_untouched(tmp_path, monkeyp
         'task1-SR-dataset-200hz.pickle',
         'task1-SR-dataset.pickle',
     ]
+
+
+# ── zuco_paths 契約 ───────────────────────────────────────────────────
+def test_tasks_list_is_the_canonical_task_tuple():
+    """TASKS 與 zuco_paths.CANONICAL_TASKS 必須是同一組名字，順序也一樣。"""
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    import zuco_paths
+    from resample_pickle import TASKS
+    assert tuple(TASKS) == zuco_paths.CANONICAL_TASKS
+
+
+def test_pickle_paths_agrees_with_zuco_paths(tmp_path):
+    """兩支模組推出來的路徑必須逐字相同 —— 不一致的話轉檔器與重取樣器會各寫各的。"""
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    import zuco_paths
+    from resample_pickle import _pickle_paths
+
+    root = str(tmp_path)
+    src, dst = _pickle_paths('task2-NR-2.0', 200, root)
+    zuco_root = os.path.join(root, 'dataset', 'ZuCo')
+    assert src == zuco_paths.pickle_path(zuco_root, 'task2-NR-2.0', None)
+    assert dst == zuco_paths.pickle_path(zuco_root, 'task2-NR-2.0', 200)

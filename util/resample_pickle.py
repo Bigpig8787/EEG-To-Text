@@ -22,10 +22,11 @@ from scipy import signal
 from tqdm import tqdm
 
 from eeg_resample import DEFAULT_FS_IN, DEFAULT_FS_OUT, resample_eeg
+from zuco_paths import CANONICAL_TASKS, pickle_path
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
-TASKS = ['task1-SR', 'task2-NR', 'task3-TSR', 'task2-NR-2.0', 'task2-TSR-2.0']
+TASKS = list(CANONICAL_TASKS)
 
 VERIFY_BANDS = [('0-40', 0, 40), ('40-90', 40, 90), ('90-100', 90, 100), ('>100', 100, None)]
 
@@ -108,12 +109,15 @@ def verify_report(before: np.ndarray, after: np.ndarray,
 def _pickle_paths(task_name: str, fs_out: int, project_root: str = PROJECT_ROOT):
     """算出 `task_name` 的來源/目的 pickle 路徑。
 
+    路徑樣板本身在 `zuco_paths`，跟轉檔器共用同一份 —— 兩邊各留一份會漂移，
+    而漂移的後果是轉檔器寫到一個地方、這裡讀另一個地方。
+
     `project_root` 可覆寫（測試用合成的 tmp 目錄），預設是本檔案所在的
     `EEG-To-Text/` repo 根目錄。
     """
-    pickle_dir = os.path.join(project_root, 'dataset', 'ZuCo', task_name, 'pickle')
-    src = os.path.join(pickle_dir, f'{task_name}-dataset.pickle')
-    dst = os.path.join(pickle_dir, f'{task_name}-dataset-{fs_out}hz.pickle')
+    zuco_root = os.path.join(project_root, 'dataset', 'ZuCo')
+    src = pickle_path(zuco_root, task_name, None)
+    dst = pickle_path(zuco_root, task_name, fs_out)
     return src, dst
 
 
