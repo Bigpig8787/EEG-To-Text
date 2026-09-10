@@ -80,20 +80,21 @@ def _build_sentence(f, idx, rawData, contentData, wordData, mean_objs):
 def build_dataset_dict(mat_paths: list, subject_skip=SKIP_SUBJECTS) -> dict:
     """解析一組 v2.0（HDF5 / v7.3）`.mat`，回傳 `{subject: [sent_obj | None, ...]}`。"""
     dataset_dict = {}
-    for file_name in tqdm(mat_paths):
+    for p_idx, file_name in enumerate(tqdm(mat_paths, desc='Subjects')):
         subject = os.path.basename(file_name).split('results')[1].split('_')[0]
         if subject in subject_skip:
             continue
 
         dataset_dict[subject] = []
-        with h5py.File(file_name, 'r') as f:
+        with h5py.File(file_name, 'r', rdcc_nbytes=128*1024*1024) as f:
             sd = f['sentenceData']
             rawData = sd['rawData']
             contentData = sd['content']
             wordData = sd['word']
             mean_objs = {'mean_' + b: sd['mean_' + b] for b in BANDS}
 
-            for idx in range(len(rawData)):
+            n_sent = len(rawData)
+            for idx in tqdm(range(n_sent), desc='{} ({}/{})'.format(subject, p_idx + 1, len(mat_paths)), leave=False):
                 dataset_dict[subject].append(
                     _build_sentence(f, idx, rawData, contentData,
                                     wordData, mean_objs))

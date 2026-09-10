@@ -186,7 +186,7 @@ def extract_word_level_data(data_container, word_objects, eeg_float_resolution =
                     word_level_data[word_idx] = data_dict
                     word_idx += 1
                 else:
-                    print(word_string + " is not a real word.")
+                    pass
         else:
             # If there are no word-level data it will be word embeddings alone
             word_level_data = {}
@@ -218,7 +218,7 @@ def extract_word_level_data(data_container, word_objects, eeg_float_resolution =
                     word_level_data[word_idx] = data_dict
                     word_idx += 1
                 else:
-                    print(word_string + " is not a real word.")
+                    pass
 
             sentence = " ".join([load_matlab_string(data_container[word_obj[0]]) for word_obj in word_objects['content']])
             #print("Only available objects for the sentence '{}' are {}.".format(sentence, available_objects))
