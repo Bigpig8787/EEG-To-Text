@@ -14,13 +14,13 @@ import tempfile
 # 正規名 -> (資料集版本目錄, 磁碟上的 task 目錄名)
 #
 # 磁碟名是實地看過的，不是推測：`task1- SR` 的 '-' 後面有一個空格，
-# 另外四個的 '-' 兩側都有空格，而 `task2-TSR-2.0` 的磁碟名是
-# `task2 - TSR` —— 少了 `-2.0`。
+# 另外四個的 '-' 兩側都有空格。ZuCo 2.0 的磁碟目錄名是
+# `task1 - NR` 與 `task2 - TSR` —— 沒有 `-2.0`，且 NR 是 task1。
 TASK_LAYOUT = {
     'task1-SR':      ('v1', 'task1- SR'),
     'task2-NR':      ('v1', 'task2 - NR'),
     'task3-TSR':     ('v1', 'task3 - TSR'),
-    'task2-NR-2.0':  ('v2', 'task2 - NR-2.0'),
+    'task2-NR-2.0':  ('v2', 'task1 - NR'),
     'task2-TSR-2.0': ('v2', 'task2 - TSR'),
 }
 

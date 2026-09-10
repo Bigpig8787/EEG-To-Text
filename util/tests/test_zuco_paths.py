@@ -30,11 +30,11 @@ def test_every_canonical_task_has_a_layout_entry():
     ('task1-SR',      'v1', 'task1- SR'),
     ('task2-NR',      'v1', 'task2 - NR'),
     ('task3-TSR',     'v1', 'task3 - TSR'),
-    ('task2-NR-2.0',  'v2', 'task2 - NR-2.0'),
+    ('task2-NR-2.0',  'v2', 'task1 - NR'),
     ('task2-TSR-2.0', 'v2', 'task2 - TSR'),
 ])
 def test_on_disk_names_carry_the_exact_spacing(task, version, on_disk):
-    """磁碟上的名字帶空格，且 task2-TSR-2.0 的磁碟名沒有 -2.0。
+    """磁碟上的名字帶空格，ZuCo 2.0 的磁碟名是 task1 - NR 與 task2 - TSR。
     這些是實地看過的字串，不是推測出來的。"""
     assert TASK_LAYOUT[task] == (version, on_disk)
 
