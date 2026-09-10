@@ -64,7 +64,7 @@ def build_dataset_dict(mat_paths: list, include_answer_eeg: bool = False) -> dic
             for word in np.atleast_1d(word_data):
                 word_tokens_all.append(word.content)
                 word_obj = {'content': word.content, 'nFixations': word.nFixations}
-                if word.nFixations > 0:
+                if np.size(word.nFixations) > 0 and word.nFixations > 0:
                     word_obj['word_level_EEG'] = {
                         'FFD': {'FFD_' + b: getattr(word, 'FFD_' + b) for b in BANDS},
                         'TRT': {'TRT_' + b: getattr(word, 'TRT_' + b) for b in BANDS},
