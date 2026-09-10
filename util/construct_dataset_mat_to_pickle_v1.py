@@ -24,8 +24,14 @@ BANDS = ['t1', 't2', 'a1', 'a2', 'b1', 'b2', 'g1', 'g2']
 V1_TASKS = ('task1-SR', 'task2-NR', 'task3-TSR')
 
 
-def build_dataset_dict(mat_paths: list) -> dict:
-    """解析一組 v1.0 `.mat`，回傳 `{subject: [sent_obj | None, ...]}`。"""
+def build_dataset_dict(mat_paths: list, include_answer_eeg: bool = False) -> dict:
+    """解析一組 v1.0 `.mat`，回傳 `{subject: [sent_obj | None, ...]}`。
+
+    `include_answer_eeg` 由呼叫端（`convert()`）決定 —— 只有 task1-SR 的
+    `.mat` 真的有 `answer_mean_*` 欄位；這支函式只管解析，不該自己猜 task
+    語意。就算 `include_answer_eeg=True`，仍用 `hasattr` 當第二道防線，
+    這樣一份真的缺欄位的 task1-SR 檔也不會炸。
+    """
     dataset_dict = {}
     for mat_file in tqdm(mat_paths):
         subject = os.path.basename(mat_file).split('_')[0].replace('results', '').strip()
@@ -48,7 +54,7 @@ def build_dataset_dict(mat_paths: list) -> dict:
                 if raw.ndim == 2 and raw.shape[0] == 105:
                     sent_obj['rawData'] = raw
 
-            if hasattr(sent, 'answer_mean_t1'):
+            if include_answer_eeg and hasattr(sent, 'answer_mean_t1'):
                 sent_obj['answer_EEG'] = {
                     'answer_mean_' + b: getattr(sent, 'answer_mean_' + b)
                     for b in BANDS}
@@ -106,7 +112,8 @@ def convert(dataset_root: str, output_root: str, task: str,
         raise FileNotFoundError('No .mat files under: ' + in_dir)
 
     print('[{}] {} mat file(s) from {}'.format(task, len(mat_paths), in_dir))
-    dataset_dict = build_dataset_dict(mat_paths)
+    dataset_dict = build_dataset_dict(
+        mat_paths, include_answer_eeg=(task == 'task1-SR'))
 
     written = {}
     for fs_out in fs_out_list:

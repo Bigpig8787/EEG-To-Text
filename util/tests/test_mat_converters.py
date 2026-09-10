@@ -19,23 +19,34 @@ import construct_dataset_mat_to_pickle_v1 as v1                       # noqa: E4
 import zuco_paths                                                     # noqa: E402
 
 
-def _fake_sentence(n_samples=1000, with_raw=True):
-    """最小的 v1 sentenceData 元素，欄位名與真實 .mat 一致。"""
+def _fake_sentence(n_samples=1000, with_raw=True, with_answer=True, with_word=True):
+    """最小的 v1 sentenceData 元素，欄位名與真實 .mat 一致。
+
+    `with_answer=False` 模擬 NR/TSR 的 `.mat`：沒有 `answer_mean_*` 欄位
+    （那是只有 task1-SR 才問的閱讀理解題分數）。
+    `with_word=False` 模擬完全被跳過的句子：`word` 欄位是 NaN 純量，
+    而不是 word-struct 的 object array —— 真實 ZuCo 檔案裡這代表這句沒有
+    任何 fixation 記錄。
+    """
     bands = ['t1', 't2', 'a1', 'a2', 'b1', 'b2', 'g1', 'g2']
     sent = {'content': 'the quick brown fox'}
     for b in bands:
         sent['mean_' + b] = np.zeros(105, dtype=np.float32)
-        sent['answer_mean_' + b] = np.zeros(105, dtype=np.float32)
+        if with_answer:
+            sent['answer_mean_' + b] = np.zeros(105, dtype=np.float32)
     if with_raw:
         sent['rawData'] = np.random.randn(105, n_samples).astype(np.float32)
     else:
         sent['rawData'] = np.float64(np.nan)      # 真實檔缺 rawData 時是 float
-    word = {'content': 'the', 'nFixations': np.int64(1)}
-    for b in bands:
-        word['FFD_' + b] = np.zeros(105, dtype=np.float32)
-        word['TRT_' + b] = np.zeros(105, dtype=np.float32)
-        word['GD_' + b] = np.zeros(105, dtype=np.float32)
-    sent['word'] = np.array([word], dtype=object)
+    if with_word:
+        word = {'content': 'the', 'nFixations': np.int64(1)}
+        for b in bands:
+            word['FFD_' + b] = np.zeros(105, dtype=np.float32)
+            word['TRT_' + b] = np.zeros(105, dtype=np.float32)
+            word['GD_' + b] = np.zeros(105, dtype=np.float32)
+        sent['word'] = np.array([word], dtype=object)
+    else:
+        sent['word'] = np.float64(np.nan)         # 真實檔完全跳過的句子，word 是 NaN 純量
     return sent
 
 
@@ -43,11 +54,12 @@ def _write_v1_mat(path, sentences):
     sio.savemat(path, {'sentenceData': np.array(sentences, dtype=object)})
 
 
-def _make_v1_tree(tmp_path, task='task1-SR', n_samples=1000):
+def _make_v1_tree(tmp_path, task='task1-SR', n_samples=1000, with_answer=True):
     mat_dir = tmp_path / 'v1' / zuco_paths.TASK_LAYOUT[task][1] / 'Matlab files'
     mat_dir.mkdir(parents=True)
     _write_v1_mat(str(mat_dir / 'resultsZAB_SR.mat'),
-                  [_fake_sentence(n_samples), _fake_sentence(n_samples, with_raw=False)])
+                  [_fake_sentence(n_samples, with_answer=with_answer),
+                   _fake_sentence(n_samples, with_raw=False, with_answer=with_answer)])
     return mat_dir
 
 
@@ -119,3 +131,59 @@ def test_missing_mat_dir_names_the_path_it_looked_in(tmp_path):
     with pytest.raises(FileNotFoundError) as exc:
         v1.convert(str(tmp_path), str(tmp_path / 'out'), 'task1-SR', [None])
     assert 'task1- SR' in str(exc.value)
+
+
+def test_answer_eeg_absent_when_fields_are_absent_for_nr(tmp_path):
+    """NR 的 `.mat` 沒有 `answer_mean_*` 欄位；缺欄位分支要安全地不放 answer_EEG。"""
+    _make_v1_tree(tmp_path, task='task2-NR', with_answer=False)
+    out = tmp_path / 'out'
+    written = v1.convert(str(tmp_path), str(out), 'task2-NR', [None])
+
+    with open(written[None], 'rb') as handle:
+        data = pickle.load(handle)
+    assert all('answer_EEG' not in s for s in data['ZAB'] if s is not None)
+
+
+def test_answer_eeg_excluded_for_nr_even_if_fields_happen_to_exist(tmp_path):
+    """關鍵回歸測試：就算 NR 的 struct 剛好帶了 answer_mean_* 欄位（例如佔位值），
+    也不該被收進 answer_EEG —— 這個欄位是 task1-SR 特有的閱讀理解題分數，
+    決定要不要收的是 task，不是欄位存不存在。舊版曾經只看
+    `hasattr(sent, 'answer_mean_t1')`，會在這裡誤收。
+    """
+    _make_v1_tree(tmp_path, task='task2-NR', with_answer=True)
+    out = tmp_path / 'out'
+    written = v1.convert(str(tmp_path), str(out), 'task2-NR', [None])
+
+    with open(written[None], 'rb') as handle:
+        data = pickle.load(handle)
+    assert all('answer_EEG' not in s for s in data['ZAB'] if s is not None)
+
+
+def test_answer_eeg_still_present_for_task1_sr(tmp_path):
+    _make_v1_tree(tmp_path, task='task1-SR')
+    out = tmp_path / 'out'
+    written = v1.convert(str(tmp_path), str(out), 'task1-SR', [None])
+
+    with open(written[None], 'rb') as handle:
+        data = pickle.load(handle)
+    assert 'answer_EEG' in data['ZAB'][0]
+
+
+def test_a_sentence_with_no_fixations_at_all_becomes_none_at_both_rates(tmp_path):
+    """word 欄位是 NaN 純量代表這句完全沒有 fixation 記錄，應該變成 `None`。"""
+    task = 'task1-SR'
+    mat_dir = tmp_path / 'v1' / zuco_paths.TASK_LAYOUT[task][1] / 'Matlab files'
+    mat_dir.mkdir(parents=True)
+    _write_v1_mat(str(mat_dir / 'resultsZAB_SR.mat'),
+                  [_fake_sentence(1000), _fake_sentence(1000, with_word=False)])
+    out = tmp_path / 'out'
+
+    written = v1.convert(str(tmp_path), str(out), task, [None, 200])
+
+    with open(written[None], 'rb') as handle:
+        at_500 = pickle.load(handle)
+    with open(written[200], 'rb') as handle:
+        at_200 = pickle.load(handle)
+
+    assert at_500['ZAB'][1] is None
+    assert at_200['ZAB'][1] is None
