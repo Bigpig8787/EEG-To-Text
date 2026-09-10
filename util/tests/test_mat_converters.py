@@ -187,3 +187,113 @@ def test_a_sentence_with_no_fixations_at_all_becomes_none_at_both_rates(tmp_path
 
     assert at_500['ZAB'][1] is None
     assert at_200['ZAB'][1] is None
+
+
+# ── v2（h5py / v7.3 mat） ─────────────────────────────────────────────
+import h5py                                                           # noqa: E402
+import construct_dataset_mat_to_pickle_v2 as v2                       # noqa: E402
+
+
+def _write_v2_mat(path, n_sent=2, n_samples=1000):
+    """寫一個最小的 v7.3 風格 mat：sentenceData 底下都是 object reference。"""
+    with h5py.File(path, 'w') as f:
+        sd = f.create_group('sentenceData')
+        refs = {k: [] for k in ('rawData', 'content', 'word')}
+        for i in range(n_sent):
+            raw = f.create_dataset('raw{}'.format(i),
+                                   data=np.random.randn(n_samples, 105))
+            content = f.create_dataset(
+                'content{}'.format(i),
+                data=np.array([[ord(c)] for c in 'hello'], dtype=np.uint16))
+            word = f.create_dataset('word{}'.format(i), data=np.zeros(1))
+            refs['rawData'].append(raw.ref)
+            refs['content'].append(content.ref)
+            refs['word'].append(word.ref)
+        for key, values in refs.items():
+            sd.create_dataset(key, data=np.array(
+                [[v] for v in values], dtype=h5py.special_dtype(ref=h5py.Reference)))
+        mean_val = f.create_dataset('mean_val', data=np.zeros((105, 1)))
+        for b in ['t1', 't2', 'a1', 'a2', 'b1', 'b2', 'g1', 'g2']:
+            sd.create_dataset('mean_' + b, data=np.array(
+                [[mean_val.ref] for _ in range(n_sent)], dtype=h5py.special_dtype(ref=h5py.Reference)))
+
+
+def _mock_v2_words(f, word_obj):
+    word_data = {0: {'content': 'hello', 'nFix': 1,
+                     'GD_EEG': np.zeros((8, 105)),
+                     'FFD_EEG': np.zeros((8, 105)),
+                     'TRT_EEG': np.zeros((8, 105))}}
+    return word_data, ['hello'], ['hello'], ['hello']
+
+
+def test_v2_transposes_rawdata_to_channels_first(tmp_path, monkeypatch):
+    """v2 的 rawData 存成 (T, 105)，必須轉成 (105, T)。"""
+    monkeypatch.setattr(v2.dh, 'extract_word_level_data', _mock_v2_words)
+    task = 'task2-NR-2.0'
+    mat_dir = tmp_path / 'v2' / zuco_paths.TASK_LAYOUT[task][1] / 'Matlab files'
+    mat_dir.mkdir(parents=True)
+    _write_v2_mat(str(mat_dir / 'resultsYAC_NR.mat'), n_samples=1000)
+
+    written = v2.convert(str(tmp_path), str(tmp_path / 'out'), task, [None, 200])
+
+    with open(written[None], 'rb') as handle:
+        at_500 = pickle.load(handle)
+    raws = [s['rawData'] for s in at_500['YAC'] if s and 'rawData' in s]
+    assert raws, 'no sentence carried rawData'
+    assert raws[0].shape == (105, 1000)
+
+    with open(written[200], 'rb') as handle:
+        at_200 = pickle.load(handle)
+    raws200 = [s['rawData'] for s in at_200['YAC'] if s and 'rawData' in s]
+    assert raws200[0].shape == (105, 400)
+
+
+def test_v2_skips_the_excluded_subject(tmp_path, monkeypatch):
+    """YMH 在原本的腳本裡就被跳過，這個行為要保留。"""
+    monkeypatch.setattr(v2.dh, 'extract_word_level_data', _mock_v2_words)
+    task = 'task2-NR-2.0'
+    mat_dir = tmp_path / 'v2' / zuco_paths.TASK_LAYOUT[task][1] / 'Matlab files'
+    mat_dir.mkdir(parents=True)
+    _write_v2_mat(str(mat_dir / 'resultsYAC_NR.mat'))
+    _write_v2_mat(str(mat_dir / 'resultsYMH_NR.mat'))
+
+    written = v2.convert(str(tmp_path), str(tmp_path / 'out'), task, [None])
+    with open(written[None], 'rb') as handle:
+        data = pickle.load(handle)
+    assert 'YAC' in data
+    assert 'YMH' not in data
+
+
+def test_v2_only_reads_mat_files_matching_the_task_suffix(tmp_path, monkeypatch):
+    """同一個目錄可能同時放 _NR.mat 與 _TSR.mat，不能混到。"""
+    monkeypatch.setattr(v2.dh, 'extract_word_level_data', _mock_v2_words)
+    task = 'task2-NR-2.0'
+    mat_dir = tmp_path / 'v2' / zuco_paths.TASK_LAYOUT[task][1] / 'Matlab files'
+    mat_dir.mkdir(parents=True)
+    _write_v2_mat(str(mat_dir / 'resultsYAC_NR.mat'))
+    _write_v2_mat(str(mat_dir / 'resultsYAG_TSR.mat'))
+
+    written = v2.convert(str(tmp_path), str(tmp_path / 'out'), task, [None])
+    with open(written[None], 'rb') as handle:
+        data = pickle.load(handle)
+    assert set(data) == {'YAC'}
+
+
+def test_v2_sentence_without_words_becomes_none_at_both_rates(tmp_path, monkeypatch):
+    """沒有 word-level 資料的句子在 v2 轉檔器中必須保留為 None sentinel。"""
+    task = 'task2-NR-2.0'
+    mat_dir = tmp_path / 'v2' / zuco_paths.TASK_LAYOUT[task][1] / 'Matlab files'
+    mat_dir.mkdir(parents=True)
+    _write_v2_mat(str(mat_dir / 'resultsYAC_NR.mat'), n_sent=2)
+    monkeypatch.setattr(v2.dh, 'extract_word_level_data',
+                        lambda f, w: ({}, [], [], []))
+
+    written = v2.convert(str(tmp_path), str(tmp_path / 'out'), task, [None, 200])
+
+    with open(written[None], 'rb') as handle:
+        at_500 = pickle.load(handle)
+    with open(written[200], 'rb') as handle:
+        at_200 = pickle.load(handle)
+    assert at_500['YAC'] == [None, None]
+    assert at_200['YAC'] == [None, None]
+
