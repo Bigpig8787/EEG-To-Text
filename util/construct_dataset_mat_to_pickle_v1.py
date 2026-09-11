@@ -3,6 +3,8 @@
 一次 .mat pass 可同時輸出多個採樣率 —— 讀 .mat 是整個流程最慢的一步，
 重取樣相對免費，所以預設同時寫 500Hz 與 200Hz 兩份。
 
+峰值記憶體與磁碟空間的說明見 `zuco_convert.run()`。
+
     python util/construct_dataset_mat_to_pickle_v1.py \\
         -t task1-SR \\
         --dataset_root /home/jovyan/datasets/soc-20260831131547 \\
@@ -11,7 +13,6 @@
 
 import argparse
 import os
-import pickle
 
 import numpy as np
 import scipy.io as io

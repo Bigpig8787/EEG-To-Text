@@ -6,6 +6,8 @@ ZuCo 2.0 的 .mat 是 v7.3（HDF5），要用 h5py 讀，`sentenceData` 底下�
 一次 .mat pass 可同時輸出多個採樣率 —— 讀 .mat 是整個流程最慢的一步，
 重取樣相對免費，所以預設同時寫 500Hz 與 200Hz 兩份。
 
+峰值記憶體與磁碟空間的說明見 `zuco_convert.run()`。
+
     python util/construct_dataset_mat_to_pickle_v2.py \
         -t task2-NR-2.0 \
         --dataset_root /home/jovyan/datasets/soc-20260831131547 \

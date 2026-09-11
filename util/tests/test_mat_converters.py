@@ -16,6 +16,7 @@ import scipy.io as sio
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import construct_dataset_mat_to_pickle_v1 as v1                       # noqa: E402
+import zuco_convert                                                   # noqa: E402
 import zuco_paths                                                     # noqa: E402
 
 
@@ -144,6 +145,24 @@ def test_a_single_corrupt_mat_file_does_not_abort_the_whole_run(tmp_path, capsys
     assert 'BAD' not in data
     assert 'failed to parse' in captured.out
     assert 'resultsBAD_SR.mat' in captured.out
+
+
+def test_disk_space_precheck_raises_before_any_mat_is_parsed(tmp_path, monkeypatch):
+    """F8：磁碟空間明顯不夠要在解析任何 .mat 之前就擋下來，不是等寫檔才發現。
+    `_atomic_pickle_dump` 不留半成品檔案是善後，不是預防。"""
+    _make_v1_tree(tmp_path)
+    parsed = []
+    monkeypatch.setattr(v1, 'build_dataset_dict',
+                        lambda *a, **k: parsed.append(1) or {})
+
+    class _FakeUsage:
+        free = 0
+
+    monkeypatch.setattr(zuco_convert.shutil, 'disk_usage', lambda path: _FakeUsage())
+
+    with pytest.raises(RuntimeError, match='free'):
+        v1.convert(str(tmp_path), str(tmp_path / 'out'), 'task1-SR', [None, 200])
+    assert parsed == [], 'a .mat was parsed before the disk-space check'
 
 
 def test_output_root_is_checked_before_any_mat_is_parsed(tmp_path, monkeypatch):
