@@ -41,9 +41,25 @@ def test_every_canonical_task_is_reachable_from_the_snn_side(pickle_naming):
     (None, '-dataset.pickle'),
     (200, '-dataset-200hz.pickle'),
 ])
-def test_written_filename_matches_what_the_trainer_looks_for(
-        pickle_naming, fs_out, suffix):
+def test_written_path_matches_what_the_trainer_looks_for(
+        pickle_naming, fs_out, suffix, tmp_path):
+    """比對整條路徑，不只檔名——只比檔名擋不住「轉檔器輸出多套一層 v1/v2/
+    子目錄」這種回歸：`zuco_paths.pickle_name()` 照樣回傳一模一樣的檔名，
+    只有 `pickle_dir()`（這裡走的是 `pickle_path()`）多了一層才會露餡。
+
+    trainer 端（`cfg_runner/train_multiview_snn_cfg.py:78`，
+    `pretrain_snn_cfg.py:70`、`eval_multiview_snn_cfg.py:78` 三份逐字相同）
+    組路徑的方式是
+    `dataset_root / TASK_DIRS[key] / 'pickle' / pickle_file_name(key, suffix)`；
+    這裡刻意用同樣的積木（`pickle_naming.TASK_DIRS`、
+    `pickle_naming.pickle_file_name`）逐字重組一次，而不是拿一個寫死的路徑
+    字串比對，這樣「flat layout、無 v1/v2 層」這條契約才是被組出來驗證，
+    不是被抄一次而已。
+    """
+    dataset_root = str(tmp_path)
     for key, canonical in pickle_naming.TASK_DIRS.items():
-        written = os.path.basename(zuco_paths.pickle_name(canonical, fs_out))
-        looked_for = pickle_naming.pickle_file_name(key, suffix)
+        written = zuco_paths.pickle_path(dataset_root, canonical, fs_out)
+        looked_for = os.path.join(
+            dataset_root, canonical, 'pickle',
+            pickle_naming.pickle_file_name(key, suffix))
         assert written == looked_for, (canonical, written, looked_for)
