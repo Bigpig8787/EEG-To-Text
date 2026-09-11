@@ -51,6 +51,15 @@ def test_pickle_dir_uses_the_canonical_name_and_no_version_layer():
     assert got == os.path.join('out', 'task2-NR-2.0', 'pickle')
 
 
+def test_pickle_dir_raises_for_an_unknown_task():
+    """`pickle_dir` 之前跳過了 `mat_dir`/`pickle_name` 都有做的 `_layout`
+    驗證，打錯的 task 名會回傳一個看似合理的假路徑，還會被 `assert_writable`
+    建出一個雜散目錄、通過寫入探測，直到 `pickle_name` 才終於炸。"""
+    with pytest.raises(KeyError) as exc:
+        pickle_dir('out', 'task9-XX')
+    assert 'task1-SR' in str(exc.value)
+
+
 def test_pickle_name_without_fs_is_the_500hz_original():
     assert pickle_name('task1-SR') == 'task1-SR-dataset.pickle'
     assert pickle_name('task2-TSR-2.0') == 'task2-TSR-2.0-dataset.pickle'
@@ -93,3 +102,15 @@ def test_assert_writable_reports_the_path_when_it_cannot_write(tmp_path, monkeyp
 
     with pytest.raises(RuntimeError, match='not writable'):
         assert_writable(str(tmp_path))
+
+
+def test_assert_writable_reports_the_path_when_makedirs_fails(tmp_path, monkeypatch):
+    """`os.makedirs` 失敗（例如唯讀掛載點連父目錄都建不出來）是這個函式
+    存在的主要情境——`os.makedirs` 會在 tempfile 探測之前就先炸，所以這個
+    分支才是真正會在唯讀掛載點上跑到的那條路，先前完全沒有測試覆蓋。"""
+    def _boom(*a, **k):
+        raise OSError('read-only file system')
+    monkeypatch.setattr('zuco_paths.os.makedirs', _boom)
+
+    with pytest.raises(RuntimeError, match='not writable'):
+        assert_writable(str(tmp_path / 'missing' / 'dir'))

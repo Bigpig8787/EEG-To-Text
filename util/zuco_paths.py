@@ -63,6 +63,7 @@ def pickle_dir(output_root: str, task: str) -> str:
     `pickle_naming.pickle_file_name()` 假設 task 平鋪在 dataset_root 底下，
     維持這個假設，轉檔完成後 SNN 端一行都不用改。
     """
+    _layout(task)  # 讓打錯的 task 名在這裡就炸，而不是回傳一個看似合理的假路徑
     return os.path.join(output_root, task, 'pickle')
 
 
