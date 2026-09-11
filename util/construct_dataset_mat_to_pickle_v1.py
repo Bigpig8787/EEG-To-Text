@@ -17,8 +17,7 @@ import numpy as np
 import scipy.io as io
 from tqdm import tqdm
 
-import zuco_paths
-from resample_pickle import _atomic_pickle_dump, resample_dataset_dict
+import zuco_convert
 
 BANDS = ['t1', 't2', 'a1', 'a2', 'b1', 'b2', 'g1', 'g2']
 V1_TASKS = ('task1-SR', 'task2-NR', 'task3-TSR')
@@ -85,8 +84,11 @@ def build_dataset_dict(mat_paths: list, include_answer_eeg: bool = False) -> dic
 
 
 def convert(dataset_root: str, output_root: str, task: str,
-            fs_out_list: list, verify: bool = False) -> dict:
+           fs_out_list: list, verify: bool = False) -> dict:
     """把一個 task 的 `.mat` 轉成 pickle，每個採樣率各一份。
+
+    共用的目錄檢查/寫檔/verify 邏輯在 `zuco_convert.run()`；這裡只負責 v1
+    專屬的部分：檔名 filter 與只有 v1 需要猜的 `include_answer_eeg` 旗標。
 
     Args:
         dataset_root: ZuCo 根目錄（底下有 `v1/` `v2/`）。
@@ -98,61 +100,20 @@ def convert(dataset_root: str, output_root: str, task: str,
     Returns:
         `{採樣率: 寫出的路徑}`，500Hz 的 key 是 `None`。
     """
-    in_dir = zuco_paths.mat_dir(dataset_root, task)
-    if not os.path.isdir(in_dir):
-        raise FileNotFoundError('No Matlab files directory at: ' + in_dir)
-
-    out_dir = zuco_paths.pickle_dir(output_root, task)
-    # 先確認寫得了再解析 —— 幾十 GB 跑完才發現唯讀，代價太高。
-    zuco_paths.assert_writable(out_dir)
-
-    mat_paths = sorted(os.path.join(in_dir, f) for f in os.listdir(in_dir)
-                       if f.endswith('.mat'))
-    if not mat_paths:
-        raise FileNotFoundError('No .mat files under: ' + in_dir)
-
-    print('[{}] {} mat file(s) from {}'.format(task, len(mat_paths), in_dir))
-    dataset_dict = build_dataset_dict(
+    build_fn = lambda mat_paths: build_dataset_dict(     # noqa: E731
         mat_paths, include_answer_eeg=(task == 'task1-SR'))
 
-    written = {}
-    for fs_out in fs_out_list:
-        if fs_out is None:
-            payload = dataset_dict
-        else:
-            payload = resample_dataset_dict(dataset_dict, 500, fs_out,
-                                            progress=True)
-        dst = zuco_paths.pickle_path(output_root, task, fs_out)
-        _atomic_pickle_dump(payload, dst)
-        written[fs_out] = dst
-        label = '500Hz' if fs_out is None else '{}Hz'.format(fs_out)
-        print('[{}] {} -> {}'.format(task, label, dst))
-
-    if verify:
-        subjects = list(dataset_dict)
-        if subjects:
-            first = dataset_dict[subjects[0]]
-            sample = next((s for s in first if s and 'rawData' in s), None)
-            if sample is None:
-                print('[WARN] {}: no sentence carries rawData'.format(task))
-            else:
-                print('[{}] rawData shape at 500Hz: {}'.format(
-                    task, sample['rawData'].shape))
-
-    return written
+    return zuco_convert.run(
+        dataset_root, output_root, task, fs_out_list, verify,
+        mat_filter=lambda f: f.endswith('.mat'),
+        build_fn=build_fn, mat_filter_desc='.mat')
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('-t', '--task_name', choices=V1_TASKS, required=True)
-    parser.add_argument('--dataset_root', required=True,
-                        help='ZuCo root; the directory containing v1/ and v2/')
-    parser.add_argument('--output_root', default=None,
-                        help='where the pickle/ dirs go (default: --dataset_root)')
-    parser.add_argument('--fs_out', nargs='+', default=['500', '200'],
-                        help="sampling rates to write; '500' means the original")
-    parser.add_argument('--verify', action='store_true')
+    zuco_convert.add_common_args(parser)
     args = parser.parse_args()
 
     fs_out_list = [None if v == '500' else int(v) for v in args.fs_out]
