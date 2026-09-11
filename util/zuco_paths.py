@@ -18,15 +18,17 @@ import tempfile
 # `task1 - NR` 與 `task2 - TSR` —— 沒有 `-2.0`，且 NR 是 task1
 # （ZuCo 2.0 自己重新編號，所以 v2 的 NR 掛在 task1 底下）。
 #
-# v2 的兩個名字是 2026-09-11 在訓練機上實際列出來的，逐字貼在這裡 ——
-# 這五個字串錯一個，那個 task 就完全找不到輸入，而且從開發機驗不了：
+# 五個名字都是 2026-09-11 在訓練機上實際列出來的，輸出逐字貼在這裡 ——
+# 錯一個，那個 task 就完全找不到輸入，而且從開發機驗不了：
+#
+#     $ ls "/home/jovyan/datasets/soc-20260831131547/v1/"
+#      answers   scripts  'task1- SR'  'task2 - NR'  'task3 - TSR'   task_materials
 #
 #     $ ls "/home/jovyan/datasets/soc-20260831131547/v2/"
 #      answers   scripts  'task1 - NR'  'task2 - TSR'   task_materials
 #
-# ⚠️ v1 的三個名字還沒用同樣方式核對過。它們來自一份手貼的目錄樹，而那份
-# 樹的 v2 部分後來被證實是舊的（寫成 `task2 - NR-2.0`）。真的開跑前，
-# 請對 v1 也跑一次 `ls` 核對。
+# `task1- SR` 的空格位置跟另外兩個 v1 目錄不一致（'-' 後面有、前面沒有），
+# 看起來像手滑但不是 —— 磁碟上就長這樣。改動這個 dict 前請重跑上面兩行。
 TASK_LAYOUT = {
     'task1-SR':      ('v1', 'task1- SR'),
     'task2-NR':      ('v1', 'task2 - NR'),
