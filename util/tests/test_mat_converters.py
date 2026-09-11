@@ -19,8 +19,16 @@ import construct_dataset_mat_to_pickle_v1 as v1                       # noqa: E4
 import zuco_convert                                                   # noqa: E402
 import zuco_paths                                                     # noqa: E402
 
+# h5py 是 v2 的可選依賴（v1 完全不需要）。用 importorskip 而不是裸的
+# `import h5py`，這樣沒裝 h5py 的環境至少會拿到一個清楚的 skip 訊息，
+# 而不是一個從 mid-file import 冒出來、看起來像是隨機位置壞掉的
+# collection error。
+h5py = pytest.importorskip('h5py')                                    # noqa: E402
+import construct_dataset_mat_to_pickle_v2 as v2                       # noqa: E402
 
-def _fake_sentence(n_samples=1000, with_raw=True, with_answer=True, with_word=True):
+
+def _fake_sentence(n_samples=1000, with_raw=True, with_answer=True, with_word=True,
+                   empty_nfixations=False):
     """最小的 v1 sentenceData 元素，欄位名與真實 .mat 一致。
 
     `with_answer=False` 模擬 NR/TSR 的 `.mat`：沒有 `answer_mean_*` 欄位
@@ -28,6 +36,9 @@ def _fake_sentence(n_samples=1000, with_raw=True, with_answer=True, with_word=Tr
     `with_word=False` 模擬完全被跳過的句子：`word` 欄位是 NaN 純量，
     而不是 word-struct 的 object array —— 真實 ZuCo 檔案裡這代表這句沒有
     任何 fixation 記錄。
+    `empty_nfixations=True` 讓唯一的 word 的 `nFixations` 是空陣列而不是
+    純量 0——真實 ZuCo 檔案偶爾會這樣存。`np.size(word.nFixations) > 0`
+    那道守門（d236ecc）就是為了擋這個案例，之前沒有測試覆蓋到。
     """
     bands = ['t1', 't2', 'a1', 'a2', 'b1', 'b2', 'g1', 'g2']
     sent = {'content': 'the quick brown fox'}
@@ -40,7 +51,8 @@ def _fake_sentence(n_samples=1000, with_raw=True, with_answer=True, with_word=Tr
     else:
         sent['rawData'] = np.float64(np.nan)      # 真實檔缺 rawData 時是 float
     if with_word:
-        word = {'content': 'the', 'nFixations': np.int64(1)}
+        nfix = np.array([]) if empty_nfixations else np.int64(1)
+        word = {'content': 'the', 'nFixations': nfix}
         for b in bands:
             word['FFD_' + b] = np.zeros(105, dtype=np.float32)
             word['TRT_' + b] = np.zeros(105, dtype=np.float32)
@@ -274,10 +286,28 @@ def test_a_sentence_with_no_fixations_at_all_becomes_none_at_both_rates(tmp_path
     assert at_200['ZAB'][1] is None
 
 
-# ── v2（h5py / v7.3 mat） ─────────────────────────────────────────────
-import h5py                                                           # noqa: E402
-import construct_dataset_mat_to_pickle_v2 as v2                       # noqa: E402
+def test_word_with_empty_nfixations_array_is_masked_without_raising(tmp_path):
+    """F8：`np.size(word.nFixations) > 0` 的守門（d236ecc）在空陣列（不是
+    純量 0）上不會出錯，且該字正確被當成沒有 fixation 處理——之前沒有
+    測試覆蓋這個分支。"""
+    task = 'task1-SR'
+    mat_dir = tmp_path / 'v1' / zuco_paths.TASK_LAYOUT[task][1] / 'Matlab files'
+    mat_dir.mkdir(parents=True)
+    _write_v1_mat(str(mat_dir / 'resultsZAB_SR.mat'),
+                  [_fake_sentence(1000, empty_nfixations=True)])
+    out = tmp_path / 'out'
 
+    written = v1.convert(str(tmp_path), str(out), task, [None])
+
+    with open(written[None], 'rb') as handle:
+        data = pickle.load(handle)
+    sent = data['ZAB'][0]
+    assert sent['word'] == []
+    assert sent['word_tokens_with_mask'] == ['[MASK]']
+    assert sent['word_tokens_has_fixation'] == []
+
+
+# ── v2（h5py / v7.3 mat） ─────────────────────────────────────────────
 
 def _write_v2_mat(path, n_sent=2, n_samples=1000):
     """寫一個最小的 v7.3 風格 mat：sentenceData 底下都是 object reference。"""
@@ -304,6 +334,18 @@ def _write_v2_mat(path, n_sent=2, n_samples=1000):
 
 
 def _mock_v2_words(f, word_obj):
+    """替身，不是懶惰：`_write_v2_mat` 的 `word` 欄位故意寫成一個
+    `float64` 純量 dataset（`np.zeros(1)`），不是真正的 word-struct
+    group——真正的 `dh.extract_word_level_data` 在這個 fixture 上
+    `available_objects[0]` 不是 `str`，會直接走 else 分支回傳
+    `({}, [], [], [])`（見 `test_extract_word_level_data_contract_is_a_four_tuple`）。
+    要測到 rawData 轉置、YMH 跳過、task 後綴過濾這些跟 word-level 資料無關
+    的行為，就得把 word 解析短路掉，所以才 monkeypatch 這個函式，換成一份
+    看起來像真的有 fixation 的資料。建一份忠實的 word-struct HDF5 fixture
+    來取代這個 mock，划不來：多了近百行只為了保護這個分支完全不會碰到的
+    程式碼，而且一份「看起來忠實但其實不是」的 fixture 比一個誠實的 mock
+    更危險。
+    """
     word_data = {0: {'content': 'hello', 'nFix': 1,
                      'GD_EEG': np.zeros((8, 105)),
                      'FFD_EEG': np.zeros((8, 105)),
@@ -364,14 +406,20 @@ def test_v2_only_reads_mat_files_matching_the_task_suffix(tmp_path, monkeypatch)
     assert set(data) == {'YAC'}
 
 
-def test_v2_sentence_without_words_becomes_none_at_both_rates(tmp_path, monkeypatch):
-    """沒有 word-level 資料的句子在 v2 轉檔器中必須保留為 None sentinel。"""
+def test_v2_sentence_without_words_becomes_none_at_both_rates(tmp_path):
+    """沒有 word-level 資料的句子在 v2 轉檔器中必須保留為 None sentinel。
+
+    這裡刻意不 monkeypatch `dh.extract_word_level_data`——`_write_v2_mat`
+    的 `word` 欄位本來就是一個 float64 純量 dataset，真正的
+    `extract_word_level_data` 在它上面就會走 else 分支回傳
+    `({}, [], [], [])`（`available_objects[0]` 不是 `str`）。用真正的函式
+    跑，這個測試才是貨真價實的端到端測試，蓋到 `_build_sentence` 裡
+    `word_data == {}` 那個 early-return，而不是「mock 驗證 mock」。
+    """
     task = 'task2-NR-2.0'
     mat_dir = tmp_path / 'v2' / zuco_paths.TASK_LAYOUT[task][1] / 'Matlab files'
     mat_dir.mkdir(parents=True)
     _write_v2_mat(str(mat_dir / 'resultsYAC_NR.mat'), n_sent=2)
-    monkeypatch.setattr(v2.dh, 'extract_word_level_data',
-                        lambda f, w: ({}, [], [], []))
 
     written = v2.convert(str(tmp_path), str(tmp_path / 'out'), task, [None, 200])
 
@@ -381,4 +429,22 @@ def test_v2_sentence_without_words_becomes_none_at_both_rates(tmp_path, monkeypa
         at_200 = pickle.load(handle)
     assert at_500['YAC'] == [None, None]
     assert at_200['YAC'] == [None, None]
+
+
+def test_extract_word_level_data_contract_is_a_four_tuple(tmp_path):
+    """簽章回歸測試：真正的 `dh.extract_word_level_data` 必須一直回傳
+    `(word_level_data, word_tokens_all, word_tokens_has_fixation,
+    word_tokens_with_mask)` 這個 4-tuple。上面所有測試都靠
+    monkeypatch（`_mock_v2_words`）或依賴這份 fixture 的特定形狀
+    （`word` 是純量 dataset）來繞開真正的 word-struct 解析，簽章本身
+    沒有被單獨釘住——一旦真正的函式簽章漂移，不會有任何測試發現。"""
+    path = tmp_path / 'contract.mat'
+    _write_v2_mat(str(path), n_sent=1)
+
+    with h5py.File(str(path), 'r') as f:
+        sd = f['sentenceData']
+        result = v2.dh.extract_word_level_data(f, f[sd['word'][0][0]])
+
+    assert isinstance(result, tuple)
+    assert len(result) == 4
 
