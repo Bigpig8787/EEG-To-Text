@@ -113,6 +113,39 @@ def test_the_source_mat_is_left_untouched(tmp_path):
     assert mat_file.read_bytes() == before
 
 
+def test_apple_double_stray_files_are_ignored(tmp_path):
+    """F4：v1 之前吃任何 `*.mat`；macOS/OSF 解壓縮常留下 AppleDouble 殘檔
+    （`._resultsZAB_SR.mat`），會被解析成 subject='._ZAB' 並在
+    `io.loadmat` 裡炸掉。過濾成 `results*.mat` 才會跳過它。"""
+    mat_dir = _make_v1_tree(tmp_path)
+    (mat_dir / '._resultsZAB_SR.mat').write_bytes(b'not a real mat file')
+    out = tmp_path / 'out'
+
+    written = v1.convert(str(tmp_path), str(out), 'task1-SR', [None])
+
+    with open(written[None], 'rb') as handle:
+        data = pickle.load(handle)
+    assert set(data) == {'ZAB'}
+
+
+def test_a_single_corrupt_mat_file_does_not_abort_the_whole_run(tmp_path, capsys):
+    """F4：解析失敗的檔案要記下來、跳過，而不是讓整個 run 連其他 subject
+    的資料都拿不到——失去一個 subject 好過失去整個 run。"""
+    mat_dir = _make_v1_tree(tmp_path)
+    (mat_dir / 'resultsBAD_SR.mat').write_bytes(b'garbage, not a real mat file')
+    out = tmp_path / 'out'
+
+    written = v1.convert(str(tmp_path), str(out), 'task1-SR', [None])
+    captured = capsys.readouterr()
+
+    with open(written[None], 'rb') as handle:
+        data = pickle.load(handle)
+    assert 'ZAB' in data
+    assert 'BAD' not in data
+    assert 'failed to parse' in captured.out
+    assert 'resultsBAD_SR.mat' in captured.out
+
+
 def test_output_root_is_checked_before_any_mat_is_parsed(tmp_path, monkeypatch):
     """唯讀輸出要在解析 .mat 之前就失敗，不能跑完幾小時才炸。"""
     _make_v1_tree(tmp_path)
