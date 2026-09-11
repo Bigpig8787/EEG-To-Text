@@ -203,6 +203,12 @@ def main():
     parser.add_argument('--fs_out', type=int, default=DEFAULT_FS_OUT)
     parser.add_argument('--verify', action='store_true',
                         help='print length and per-band energy for the first sentence')
+    parser.add_argument('--project_root', default=PROJECT_ROOT,
+                        help='root whose dataset/ZuCo/<task>/pickle/ holds the source '
+                             'pickles (default: this repo). The converters now accept an '
+                             'arbitrary --output_root, so point this at wherever that root '
+                             'is if it is (or contains) a dataset/ZuCo layout -- otherwise '
+                             'this silently resolves to the in-repo path and prints [SKIP].')
     args = parser.parse_args()
 
     if not args.all and not args.task_name:
@@ -210,7 +216,8 @@ def main():
 
     targets = TASKS if args.all else [args.task_name]
     for task_name in targets:
-        process_task(task_name, args.fs_in, args.fs_out, args.verify)
+        process_task(task_name, args.fs_in, args.fs_out, args.verify,
+                     project_root=args.project_root)
 
 
 if __name__ == '__main__':

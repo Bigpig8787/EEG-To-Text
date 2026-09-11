@@ -196,6 +196,26 @@ def test_process_task_overwrite_leaves_no_temp_files_and_says_so(tmp_path, capsy
     ]
 
 
+def test_main_plumbs_the_project_root_flag_through_to_process_task(tmp_path, monkeypatch, capsys):
+    """F5：main() 之前呼叫 process_task() 沒帶 project_root，永遠只會找
+    <repo>/dataset/ZuCo/...。轉檔器現在可以寫到任意 --output_root，重取樣
+    一份在別處的 pickle 會靜悄悄印 [SKIP] 然後以 exit 0 收場，看起來像成功。
+    --project_root 要能把這個既有的參數從 CLI 接進來。"""
+    import resample_pickle
+
+    task_name = 'task1-SR'
+    dataset = {'ZAB': [_sent(5000)]}
+    pickle_dir, _ = _make_task_pickle_dir(tmp_path, task_name, dataset)
+
+    monkeypatch.setattr(sys, 'argv', [
+        'resample_pickle.py', '-t', task_name, '--project_root', str(tmp_path)])
+    resample_pickle.main()
+    captured = capsys.readouterr()
+
+    assert 'SKIP' not in captured.out
+    assert (pickle_dir / 'task1-SR-dataset-200hz.pickle').exists()
+
+
 def test_process_task_skips_a_missing_source_without_raising(tmp_path, capsys):
     pickle_dir = tmp_path / 'dataset' / 'ZuCo' / 'task1-SR' / 'pickle'
     pickle_dir.mkdir(parents=True)
