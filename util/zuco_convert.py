@@ -14,6 +14,61 @@ import zuco_paths
 from resample_pickle import _atomic_pickle_dump, resample_dataset_dict
 
 
+def _missing_mat_dir_message(dataset_root, task, in_dir):
+    """F2：目錄名對不上時，把上一層實際有什麼列出來，讓 operator 一次就能
+    修對 `zuco_paths.TASK_LAYOUT`。上一層本身不存在（`--dataset_root` 打錯）
+    時要印出清楚的訊息，不能讓 `os.listdir` 直接炸出 traceback。
+    """
+    version, _on_disk = zuco_paths.TASK_LAYOUT[task]
+    version_dir = os.path.join(dataset_root, version)
+    try:
+        listing = sorted(os.listdir(version_dir))
+    except OSError as exc:
+        return (
+            "No 'Matlab files' dir at {}.\n"
+            "{}/ does not exist either ({}).\n"
+            "Check --dataset_root.".format(in_dir, version_dir, exc))
+    return (
+        "No 'Matlab files' dir at {}.\n"
+        "{}/ contains: {}\n"
+        "Fix util/zuco_paths.py:TASK_LAYOUT if one of those is the right "
+        "directory.".format(in_dir, version_dir, listing))
+
+
+def _print_summary(task, dataset_dict):
+    """F3：寫檔之前印出跨所有 subject 聚合的句數/None 數/rawData 數。
+
+    `--verify` 只印第一個帶 rawData 句子的 shape，抓不到「系統性地沒有任何
+    句子帶 rawData」這種全軍覆沒的解析失敗——`_v2.py` 的 `_build_sentence`
+    對 rawData 用 `except Exception: pass`，錯誤的 reference layout 會靜
+    悄悄產出零 rawData 的 pickle，沒有任何訊息。這個彙總印在寫檔迴圈之前，
+    讓 operator 能在幾十 GB 寫出去之前 Ctrl-C。
+    """
+    subjects = list(dataset_dict)
+    print('[{}] Subjects: {}'.format(task, subjects))
+    if not subjects:
+        print('[WARN] [{}] no subjects parsed'.format(task))
+        return
+
+    counts = {s: len(dataset_dict[s]) for s in subjects}
+    total_sentences = sum(counts.values())
+    total_none = sum(
+        1 for s in subjects for sent in dataset_dict[s] if sent is None)
+    total_raw = sum(
+        1 for s in subjects for sent in dataset_dict[s]
+        if sent is not None and 'rawData' in sent)
+
+    print('[{}] Sentences ({}): {}'.format(task, subjects[0], total_sentences))
+    print('[{}]   None: {}   rawData: {}'.format(task, total_none, total_raw))
+
+    if len(set(counts.values())) > 1:
+        print('[WARN] [{}] subjects disagree on sentence count: {}'.format(
+            task, counts))
+    if total_raw == 0:
+        print('[WARN] [{}] zero sentences carry rawData -- check the '
+              "'Matlab files' reference layout".format(task))
+
+
 def add_common_args(parser):
     """兩支轉檔器共用的四個 CLI flag。
 
@@ -55,7 +110,8 @@ def run(dataset_root, output_root, task, fs_out_list, verify, mat_filter,
     """
     in_dir = zuco_paths.mat_dir(dataset_root, task)
     if not os.path.isdir(in_dir):
-        raise FileNotFoundError('No Matlab files directory at: ' + in_dir)
+        raise FileNotFoundError(
+            _missing_mat_dir_message(dataset_root, task, in_dir))
 
     out_dir = zuco_paths.pickle_dir(output_root, task)
     # 先確認寫得了再解析 —— 幾十 GB 跑完才發現唯讀，代價太高。
@@ -69,6 +125,7 @@ def run(dataset_root, output_root, task, fs_out_list, verify, mat_filter,
 
     print('[{}] {} mat file(s) from {}'.format(task, len(mat_paths), in_dir))
     dataset_dict = build_fn(mat_paths)
+    _print_summary(task, dataset_dict)
 
     written = {}
     for fs_out in fs_out_list:

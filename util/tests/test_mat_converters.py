@@ -133,6 +133,39 @@ def test_missing_mat_dir_names_the_path_it_looked_in(tmp_path):
     assert 'task1- SR' in str(exc.value)
 
 
+def test_missing_mat_dir_lists_what_is_actually_there(tmp_path):
+    """F2：目錄名對不上時，把上一層實際有什麼列出來，讓 operator 一次就能
+    修對 zuco_paths.TASK_LAYOUT，而不是只看到一句 FileNotFoundError。"""
+    (tmp_path / 'v1' / 'task1 - SR (typo)').mkdir(parents=True)
+
+    with pytest.raises(FileNotFoundError) as exc:
+        v1.convert(str(tmp_path), str(tmp_path / 'out'), 'task1-SR', [None])
+
+    msg = str(exc.value)
+    assert 'task1 - SR (typo)' in msg
+    assert 'TASK_LAYOUT' in msg
+
+
+def test_summary_prints_aggregated_counts_before_the_write_loop(tmp_path, capsys):
+    """F3：--verify 只印第一個帶 rawData 句子的 shape，抓不到「系統性地沒有
+    任何句子帶 rawData」這種全軍覆沒的解析失敗。這個彙總要在寫檔迴圈之前
+    印出來，讓 operator 能在幾十 GB 寫出去之前 Ctrl-C，而且要跨所有
+    subject 聚合，不能只看 subjects[0]。"""
+    mat_dir = tmp_path / 'v1' / zuco_paths.TASK_LAYOUT['task1-SR'][1] / 'Matlab files'
+    mat_dir.mkdir(parents=True)
+    _write_v1_mat(str(mat_dir / 'resultsZAB_SR.mat'),
+                  [_fake_sentence(1000), _fake_sentence(1000, with_word=False)])
+    out = tmp_path / 'out'
+
+    v1.convert(str(tmp_path), str(out), 'task1-SR', [None])
+    captured = capsys.readouterr()
+
+    summary_idx = captured.out.index('Sentences (ZAB): 2')
+    write_idx = captured.out.index('500Hz ->')
+    assert summary_idx < write_idx, 'summary must print before the write loop'
+    assert 'None: 1   rawData: 1' in captured.out
+
+
 def test_answer_eeg_absent_when_fields_are_absent_for_nr(tmp_path):
     """NR 的 `.mat` 沒有 `answer_mean_*` 欄位；缺欄位分支要安全地不放 answer_EEG。"""
     _make_v1_tree(tmp_path, task='task2-NR', with_answer=False)
