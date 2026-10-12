@@ -138,6 +138,17 @@ Every training run shows train loss dropping but dev loss exploding. Summary of 
 
 ## Training Commands
 
+### 200 Hz run matched to the SNN best cell (2026-10-13, Linux training box)
+```bash
+cd /home/jovyan/EEG-BCI/EEG-To-Text
+nohup bash scripts/run_paper_best_200hz.sh cuda:1 > logs/ann_paper_best_200hz.out 2>&1 &
+```
+pretrain -> STEP 1 -> STEP 2 LoRA -> 4 eval combos; finished stages are skipped.
+Data flags: `--dataset_root`, `--pickle_suffix=-dataset-200hz.pickle` (the `=` is required,
+the value starts with `-`), `--raw_eeg_max_len 2000`; pretrain also takes
+`--n_spatial_filters`, fine-tune takes `--pretrained_encoder`. Eval reads the data
+settings back from `config/decoding/<save_name>.json`.
+
 ### Pre-training (**needs re-running** — see 2026-07-29 in version.md)
 ```cmd
 REM verify the MAE masking path first (random tensors, no dataset, no GPU)
@@ -269,6 +280,10 @@ anything trained after it.** Pre-trained encoder weights:
    `--not_load_step1_checkpoint`. `config.py:27` defines the flag, but
    `train_multiview.py` never reads `load_step1_checkpoint` — it does nothing in
    this script.
+12. *(fixed 2026-10-13)* `MultiViewConformerTranslator.encode()` never passed
+   `raw_max_len`, so non-5000 inputs got a wrong padding mask. It now forwards
+   `raw_eeg_max_len` from the constructor. Any 200 Hz ANN run trained before this
+   date masked out most of each sentence.
 
 ## References
 - Wang, Z. and Ji, H. (2021). Open vocabulary EEG-to-text decoding and zero-shot sentiment classification.

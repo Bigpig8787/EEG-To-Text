@@ -77,6 +77,18 @@ def get_config(case):
         parser.add_argument('-dropout', '--dropout', type=float, default=0.1,
                             help='dropout inside the encoders and transformers')
 
+        # ── data / pre-train hand-off (defaults = the previously hard-coded paths) ──
+        parser.add_argument('--dataset_root', type=str, default=None,
+                            help='folder holding <task>/pickle/; None = <repo>/dataset/ZuCo')
+        parser.add_argument('--pickle_suffix', type=str, default='-dataset.pickle',
+                            help="pickle filename tail: '-dataset.pickle' (500 Hz) or "
+                                 "'-dataset-200hz.pickle'")
+        parser.add_argument('--raw_eeg_max_len', type=int, default=5000,
+                            help='pad/truncate raw EEG to this length; 2000 for 200 Hz. Also '
+                                 'sets the padding-mask scale inside the region encoders')
+        parser.add_argument('--pretrained_encoder', type=str, default=None,
+                            help='MAE encoder to load; None = <repo>/checkpoints/pretrain/encoder_best.pt')
+
         parser.add_argument('-s', '--save_path', help='checkpoint save path', default = './checkpoints/decoding', required=True)
         parser.add_argument('-subj', '--subjects', help='use all subjects or specify a particular one', default = 'ALL', required=False)
         parser.add_argument('-eeg', '--eeg_type', help='choose from {GD, FFD, TRT}', default = 'GD', required=False)

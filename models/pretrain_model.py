@@ -70,16 +70,19 @@ class ConformerPreTrainModel(nn.Module):
     def __init__(self, n_channels=105, d_model=512, n_filters=40,
                  temporal_kernel=200, pool_stride=100,
                  n_heads=8, n_transformer_layers=4,
-                 dropout=0.1, target_T=5000):
+                 dropout=0.1, target_T=5000, n_spatial_filters=None):
         super().__init__()
         self.encoder = ConformerEncoder(
             n_channels=n_channels, d_model=d_model, n_filters=n_filters,
             temporal_kernel=temporal_kernel, pool_stride=pool_stride,
             n_heads=n_heads, n_transformer_layers=n_transformer_layers,
-            dropout=dropout
+            dropout=dropout, n_spatial_filters=n_spatial_filters,
         )
+        # The decoder mirrors the encoder's post-spatial width. With
+        # n_spatial_filters=None that is n_filters, as before.
         self.decoder = ConformerDecoder(
-            n_channels=n_channels, d_model=d_model, n_filters=n_filters,
+            n_channels=n_channels, d_model=d_model,
+            n_filters=self.encoder.n_spatial_filters,
             pool_stride=pool_stride, target_T=target_T
         )
 

@@ -10,6 +10,7 @@ from tqdm import tqdm
 from transformers import BartTokenizer, BartForConditionalGeneration
 
 from data.dataset import ZuCo_dataset
+from data.pickle_paths import default_dataset_root, task_pickle_paths
 from models.multiview import MultiViewConformerTranslator
 from metrics import compute_metrics
 from config import get_config
@@ -83,21 +84,21 @@ if __name__ == '__main__':
     device = torch.device(args['cuda'] if torch.cuda.is_available() else 'cpu')
 
     # data
+    # Data settings come from the training config, like the geometry below, so a
+    # 200 Hz run is evaluated on 200 Hz data. Old configs have none of these keys
+    # and fall back to the 500 Hz paths that used to be hard-coded here.
     whole_dataset_dicts = []
-    dd = os.path.join(PROJECT_ROOT, 'dataset', 'ZuCo')
-    for key, (task, fname) in {'task1':     ('task1-SR',      'task1-SR-dataset.pickle'),
-                                'task2':     ('task2-NR',      'task2-NR-dataset.pickle'),
-                                'task3':     ('task3-TSR',     'task3-TSR-dataset.pickle'),
-                                'taskNRv2':  ('task2-NR-2.0',  'task2-NR-2.0-dataset.pickle'),
-                                'taskTSRv2': ('task2-TSR-2.0', 'task2-TSR-2.0-dataset.pickle')}.items():
-        if key in task_name:
-            with open(os.path.join(dd, task, 'pickle', fname), 'rb') as f:
-                whole_dataset_dicts.append(pickle.load(f))
+    dd = config.get('dataset_root') or default_dataset_root(PROJECT_ROOT)
+    raw_eeg_max_len = config.get('raw_eeg_max_len', 5000)
+    for pkl in task_pickle_paths(task_name, dd, config.get('pickle_suffix', '-dataset.pickle')):
+        with open(pkl, 'rb') as f:
+            whole_dataset_dicts.append(pickle.load(f))
 
     tokenizer = BartTokenizer.from_pretrained('facebook/bart-large')
     test_set = ZuCo_dataset(whole_dataset_dicts, 'test', tokenizer,
                             subject=config['subjects'], eeg_type=config['eeg_type'],
-                            bands=config['eeg_bands'], setting='unique_sent')
+                            bands=config['eeg_bands'], setting='unique_sent',
+                            raw_eeg_max_len=raw_eeg_max_len)
     dataloaders = {'test': DataLoader(test_set, batch_size=1, shuffle=False, num_workers=0)}
 
     # model
@@ -117,7 +118,8 @@ if __name__ == '__main__':
         n_heads=config.get('n_heads', 8),
         n_encoder_layers=config.get('n_encoder_layers', 4),
         n_global_layers=config.get('n_global_layers', 3),
-        decoder_embedding_size=1024)
+        decoder_embedding_size=1024,
+        raw_eeg_max_len=raw_eeg_max_len)
     model.load_state_dict(torch.load(args['checkpoint_path'], map_location=device))
     model.to(device)
 

@@ -35,6 +35,7 @@ from peft import LoraConfig, TaskType, get_peft_model
 
 from config import get_config
 from data.dataset import ZuCo_dataset
+from data.pickle_paths import default_dataset_root, task_pickle_paths
 from models.multiview import MultiViewConformerTranslator
 
 
@@ -246,6 +247,7 @@ if __name__ == '__main__':
     N_ENCODER_LAYERS  = args.get('n_encoder_layers', 4)
     N_GLOBAL_LAYERS   = args.get('n_global_layers', 3)
     DROPOUT           = args.get('dropout', 0.1)
+    RAW_EEG_MAX_LEN   = args.get('raw_eeg_max_len', 5000)
 
     save_suffix = '_cont' if RESUME else ''
     if NO_LORA:
@@ -265,27 +267,22 @@ if __name__ == '__main__':
 
     # ── data ────────────────────────────────────────────────────────
     whole_dataset_dicts = []
-    dd = os.path.join(PROJECT_ROOT, 'dataset', 'ZuCo')
-    task_map = {
-        'task1':     ('task1-SR',      'task1-SR-dataset.pickle'),
-        'task2':     ('task2-NR',      'task2-NR-dataset.pickle'),
-        'task3':     ('task3-TSR',     'task3-TSR-dataset.pickle'),
-        'taskNRv2':  ('task2-NR-2.0',  'task2-NR-2.0-dataset.pickle'),
-        'taskTSRv2': ('task2-TSR-2.0', 'task2-TSR-2.0-dataset.pickle'),
-    }
-    for key, (task, fname) in task_map.items():
-        if key in TASK_NAME:
-            with open(os.path.join(dd, task, 'pickle', fname), 'rb') as f:
-                whole_dataset_dicts.append(pickle.load(f))
+    dd = args.get('dataset_root') or default_dataset_root(PROJECT_ROOT)
+    for pkl in task_pickle_paths(TASK_NAME, dd, args.get('pickle_suffix', '-dataset.pickle')):
+        log(f'[INFO] loading {pkl}')
+        with open(pkl, 'rb') as f:
+            whole_dataset_dicts.append(pickle.load(f))
 
     tokenizer = BartTokenizer.from_pretrained('facebook/bart-large')
     train_set = ZuCo_dataset(whole_dataset_dicts, 'train', tokenizer,
                              subject=SUBJECT_CHOICE, eeg_type=EEG_TYPE,
-                             bands=BANDS_CHOICE, setting='unique_sent')
+                             bands=BANDS_CHOICE, setting='unique_sent',
+                             raw_eeg_max_len=RAW_EEG_MAX_LEN)
     dev_set = ZuCo_dataset(whole_dataset_dicts, 'dev', tokenizer,
                            subject=SUBJECT_CHOICE, eeg_type=EEG_TYPE,
-                           bands=BANDS_CHOICE, setting='unique_sent')
-    print(f'train: {len(train_set)}, dev: {len(dev_set)}')
+                           bands=BANDS_CHOICE, setting='unique_sent',
+                           raw_eeg_max_len=RAW_EEG_MAX_LEN)
+    print(f'train: {len(train_set)}, dev: {len(dev_set)}, raw_eeg_max_len={RAW_EEG_MAX_LEN}')
 
     train_loader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
     val_loader   = DataLoader(dev_set,   batch_size=1,          shuffle=False, num_workers=0)
@@ -309,6 +306,7 @@ if __name__ == '__main__':
         n_cls_per_view=N_CLS_PER_VIEW, n_heads=N_HEADS,
         n_encoder_layers=N_ENCODER_LAYERS, n_global_layers=N_GLOBAL_LAYERS,
         dropout=DROPOUT, decoder_embedding_size=1024,
+        raw_eeg_max_len=RAW_EEG_MAX_LEN,
     )
     _n_views = len(model.region_names)
     log(f'[INFO] Architecture: d_model={D_MODEL} filters={N_FILTERS}'
@@ -321,9 +319,14 @@ if __name__ == '__main__':
     log(f'[INFO] Encoder-side params: '
         f'{sum(p.numel() for n_, p in model.named_parameters() if not n_.startswith("pretrained.")):,}')
 
-    encoder_path = os.path.join(PROJECT_ROOT, 'checkpoints', 'pretrain', 'encoder_best.pt')
+    encoder_path = (args.get('pretrained_encoder')
+                    or os.path.join(PROJECT_ROOT, 'checkpoints', 'pretrain', 'encoder_best.pt'))
     if RESUME:
         log(f'[INFO] Resume mode: skipping encoder_best.pt load (merged ckpt already contains encoder)')
+    elif args.get('pretrained_encoder') and not os.path.exists(encoder_path):
+        # An explicit path that is missing is a typo or an unfinished pre-train,
+        # not a request to train from scratch.
+        raise FileNotFoundError(f'--pretrained_encoder not found: {encoder_path}')
     elif os.path.exists(encoder_path):
         model.load_pretrained_encoder(encoder_path)
     else:

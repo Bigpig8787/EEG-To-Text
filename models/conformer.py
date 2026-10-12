@@ -33,11 +33,18 @@ class ConformerEncoder(nn.Module):
     """
     def __init__(self, n_channels=105, d_model=512, n_filters=40,
                  temporal_kernel=200, pool_stride=100,
-                 n_heads=8, n_transformer_layers=4, dropout=0.1):
+                 n_heads=8, n_transformer_layers=4, dropout=0.1,
+                 n_spatial_filters=None):
         super().__init__()
         self.n_channels = n_channels
         self.d_model = d_model
         self.pool_stride = pool_stride
+        # Same knob as `RegionalConformerEncoder`: the stem can widen then narrow
+        # (1 -> n_filters -> n_spatial_filters). Pre-training has to use the same
+        # value as fine-tuning, otherwise `projection` (n_spatial -> d_model) has a
+        # different shape and is skipped by `load_pretrained_encoder`.
+        n_spatial_filters = n_filters if n_spatial_filters is None else n_spatial_filters
+        self.n_spatial_filters = n_spatial_filters
 
         self.temporal_conv = nn.Sequential(
             nn.Conv2d(1, n_filters, kernel_size=(1, temporal_kernel),
@@ -45,13 +52,13 @@ class ConformerEncoder(nn.Module):
             nn.BatchNorm2d(n_filters),
         )
         self.spatial_conv = nn.Sequential(
-            nn.Conv2d(n_filters, n_filters, kernel_size=(n_channels, 1), bias=False),
-            nn.BatchNorm2d(n_filters),
+            nn.Conv2d(n_filters, n_spatial_filters, kernel_size=(n_channels, 1), bias=False),
+            nn.BatchNorm2d(n_spatial_filters),
             nn.ELU(),
         )
         self.pool = nn.AvgPool2d(kernel_size=(1, pool_stride))
         self.dropout = nn.Dropout(dropout)
-        self.projection = nn.Linear(n_filters, d_model)
+        self.projection = nn.Linear(n_spatial_filters, d_model)
         self.pos_encoding = PositionalEncoding(d_model, dropout=dropout, max_len=1000)
 
         encoder_layer = nn.TransformerEncoderLayer(

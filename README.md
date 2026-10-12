@@ -205,6 +205,25 @@ ANN 的 `PositionalEncoding` 是無參數的 sinusoidal，projection 也直接�
 > 模型。`load_pretrained_encoder` 會逐一跳過形狀不符的張量並印出警告，STEP 1 等同
 > 從隨機初始化開始。要暖啟動就得先用同一組幾何重跑 ANN 的 MAE pre-training。
 
+### 200Hz、對齊 SNN 1T1S 最佳格的 ANN run（2026-10-13）
+
+`scripts/run_paper_best_200hz.sh <cuda>` 一支跑完 MAE pretrain → STEP 1 → STEP 2 LoRA →
+tf×noise 四組 eval，已完成的階段自動跳過。幾何取 SNN `ablation_paper_1t1s_v1` 的
+d512/k256 格（`local_dim [512,256,512]`、kernel 100、pool 40、32 token、4 CLS、8 head、
+global 2 層），**local transformer 4 層**（SNN 是 2 層）。資料用 200Hz pickle、
+`raw_eeg_max_len 2000`。
+
+新增的 CLI（預設值 = 原本寫死的值，舊指令行為不變）：
+
+| 入口 | 參數 |
+|---|---|
+| `train_pretrain.py` | `--n_spatial_filters`、`--dataset_root`、`--pickle_suffix`、`--raw_eeg_max_len` |
+| `train_multiview.py` | `--dataset_root`、`--pickle_suffix`、`--raw_eeg_max_len`、`--pretrained_encoder` |
+| `eval_multiview.py` | 不加參數；上面三個資料欄位從訓練 config JSON 讀回 |
+
+`--pickle_suffix` 要寫成 `--pickle_suffix=-dataset-200hz.pickle`（值以 `-` 開頭，
+argparse 會當成另一個 flag）。
+
 ---
 
 ## 快速開始

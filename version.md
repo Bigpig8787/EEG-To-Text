@@ -1,5 +1,51 @@
 # Version Log — EEG-To-Text Multi-View Conformer
 
+## 2026-10-13 — 200 Hz data reaches the trainers; ANN run matched to the SNN best cell
+
+**Why.** The SNN 1T1S grid (`Spiking-EEG2TEXT/configs/ablation_paper_1t1s_v1.json`)
+picked d512 / kernel_count 256 as its best cell. The ANN control has to see the same
+200 Hz data and the same geometry, with the local transformer at 4 layers.
+
+**What blocked it.**
+1. All three entry points hard-coded `<repo>/dataset/ZuCo/<task>/pickle/<task>-dataset.pickle`
+   and the 5000-sample length.
+2. `RegionalConformerEncoder.forward(raw_max_len=5000)` was never given the real
+   length by `MultiViewConformerTranslator.encode()`. With 2000-sample input the
+   padding mask kept `ceil(2000*32/5000) = 13` of 32 tokens for a full-length sentence,
+   in both the local key-padding mask and the BART attention mask.
+3. The pre-train `ConformerEncoder` had no `n_spatial_filters`, so a 512 -> 256 stem
+   could not be pre-trained and `projection` (256 -> 512 in fine-tune) never transferred.
+4. The pre-trained encoder path was hard-coded to `checkpoints/pretrain/encoder_best.pt`.
+
+**Changes** (all defaults reproduce the old behaviour):
+- New `data/pickle_paths.py`: `task_pickle_paths()` / `existing_pickle_paths()` take a root
+  and a filename suffix; layout and suffix match the SNN `pickle_naming.py`.
+- `config.py` (train): `--dataset_root`, `--pickle_suffix`, `--raw_eeg_max_len`, `--pretrained_encoder`.
+  An explicit `--pretrained_encoder` that does not exist now raises instead of silently
+  training from scratch.
+- `train_pretrain.py`: same three data flags plus `--n_spatial_filters`; `target_T` follows
+  `--raw_eeg_max_len`.
+- `models/conformer.py` `ConformerEncoder(n_spatial_filters=None)`; `ConformerPreTrainModel`
+  passes it through and sizes the decoder from the encoder's post-spatial width.
+- `models/multiview.py` `MultiViewConformerTranslator(raw_eeg_max_len=5000)`, forwarded to
+  every region encoder. It is not a parameter or buffer, so state_dicts are unchanged.
+- `eval_multiview.py` reads `dataset_root` / `pickle_suffix` / `raw_eeg_max_len` from the
+  training config; configs written before today fall back to the 500 Hz paths.
+- `scripts/run_paper_best_200hz.sh`: pretrain -> STEP 1 -> STEP 2 -> 4 eval combos.
+
+**Verified.** `data/tests/test_pickle_paths.py` (7, stdlib) and
+`data/tests/test_200hz_model_wiring.py` (5, torch): full 2000-sample sentence keeps 32/32
+tokens (was 13); the translator forwards 2000; a 512 -> 256 pre-trained encoder loads
+`temporal_conv` + `projection` + all transformer layers with no shape skip. CPU smoke at the
+real geometry: pretrain forward/backward OK (29.4M params), fine-tune encode gives
+(1, 360, 1024) with 360/360 tokens valid, 560 tensors loaded across 10 regions. One CPU
+epoch of `train_pretrain.py` on a fake 200 Hz pickle ran end to end. `train_multiview.py`
+was not run end to end locally (needs BART-large and real pickles).
+
+**Not mirrored.** No STEP 3 (the ANN has no time steps). Pre-training is one 105-channel
+encoder, not per region. The STEP 2 encoder LR is `lr2 * 0.2`; `-lr2 5e-6` makes it 1e-6,
+the same as the SNN's `lr_lora * 0.01`.
+
 ## 2026-08-29 — an interrupted STEP 2 run can be recovered instead of retrained
 
 **Symptom.** `scripts\eval_multiview_snn_matched.bat` failed on all four

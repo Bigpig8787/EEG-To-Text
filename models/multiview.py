@@ -105,9 +105,15 @@ class MultiViewConformerTranslator(BaseEEGModel):
                  tokens_per_view=64, n_cls_per_view=4,
                  n_heads=8, n_encoder_layers=4,
                  n_global_layers=3, dropout=0.1,
-                 decoder_embedding_size=1024, n_spatial_filters=None):
+                 decoder_embedding_size=1024, n_spatial_filters=None,
+                 raw_eeg_max_len=5000):
         super().__init__()
         self.tokens_per_view = tokens_per_view
+        # Length the dataset pads raw EEG to. The padding mask in
+        # RegionalConformerEncoder.forward divides by it, so it has to equal the
+        # dataset's `raw_eeg_max_len` (2000 for the 200 Hz pickles). Before this
+        # was passed, 200 Hz data kept only ceil(2000*T/5000) of T tokens.
+        self.raw_eeg_max_len = int(raw_eeg_max_len)
         self.n_cls_per_view = n_cls_per_view
         self.region_names = list(BRAIN_REGION_CHANNEL_COUNT.keys())
 
@@ -219,7 +225,8 @@ class MultiViewConformerTranslator(BaseEEGModel):
         # Each region emits k CLS tokens for richer cross-view bandwidth.
         cls_list, local_list, valid_list = [], [], []
         for region, encoder in self.view_encoders.items():
-            cls, local, local_valid = encoder(view_inputs[region], eeg_len=raw_eeg_lens)
+            cls, local, local_valid = encoder(view_inputs[region], eeg_len=raw_eeg_lens,
+                                              raw_max_len=self.raw_eeg_max_len)
             cls_list.append(cls)         # each (B, k, d_model)
             local_list.append(local)
             valid_list.append(local_valid)
