@@ -1,5 +1,28 @@
 # Version Log — EEG-To-Text Multi-View Conformer
 
+## 2026-10-17 — sentence-ranking evaluation (neither TF nor free generation)
+
+**Why.** Teacher forcing scores BART's LM (rand_like input scores the same), and free
+generation collapses to one Wikipedia-bio template (BLEU-4 < 1). Neither says whether
+the EEG is used.
+
+**What.** `eval_ranking.py` (entry) + `eval/ranking.py` (torch, shared with the SNN
+repo) + `eval/ranking_core.py` (stdlib: candidates, shuffle partner, rank, summary).
+For each test sample the true sentence and K-1 (default 49) other distinct test
+sentences are scored by per-token NLL under that sample's EEG; BART's encoder runs once,
+the decoder scores the candidates in chunks. Reported per input mode:
+top-1 / top-5 / MRR / mean rank (chance = 1/K, 5/K, H_K/K, (K+1)/2) and the true
+sentence's corpus NLL / perplexity. Modes: `real`, `rand` (`rand_like`, same as
+`eval_multiview -n True`), `shuffle` (EEG of another test sample with a different
+sentence — the distribution-preserving control). Candidates and shuffle partners depend
+only on (seed, sample index, sentence ids), so the SNN entry sees the same ones.
+Ties count against the true sentence. Output `results/<task>-multiview<suffix>_ranking.json`
+(per-sample ranks included for paired tests).
+
+**Verified.** 8 stdlib tests (`eval/tests/test_ranking_core.py`). Toy BART on CPU:
+`candidate_nll` equals HF `loss` per candidate to 1e-4; a toy trained so the input
+identifies the sentence ranks real 100% top-1, rand 11%, shuffle 0% (chance 16.7%).
+
 ## 2026-10-13 — 200 Hz data reaches the trainers; ANN run matched to the SNN best cell
 
 **Why.** The SNN 1T1S grid (`Spiking-EEG2TEXT/configs/ablation_paper_1t1s_v1.json`)

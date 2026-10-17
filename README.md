@@ -338,6 +338,18 @@ python run_pipeline.py --eval_only --eval_ckpt ./checkpoints/multiview/best/mode
 
 ---
 
+### 6. 句子排序評分（2026-10-17）
+
+不用 TF 也不用 free generation：每個 test 樣本把正確句子和 49 個其他 test 句子用該段 EEG
+下的每 token NLL 排序，報 top-1 / top-5 / MRR（亂猜 = 2% / 10% / 0.09）與正確句子的
+perplexity；輸入分 `real`、`rand`（rand_like）、`shuffle`（別句的 EEG）三種。
+
+```bash
+python eval_ranking.py -checkpoint <..._merged.pt> -conf config/decoding/<save_name>.json -cuda cuda:1
+```
+
+---
+
 ## 模組化 API
 
 ### DataPipeline

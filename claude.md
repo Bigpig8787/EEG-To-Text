@@ -149,6 +149,13 @@ the value starts with `-`), `--raw_eeg_max_len 2000`; pretrain also takes
 `--n_spatial_filters`, fine-tune takes `--pretrained_encoder`. Eval reads the data
 settings back from `config/decoding/<save_name>.json`.
 
+### Sentence-ranking eval (2026-10-17)
+```bash
+python eval_ranking.py -checkpoint <..._merged.pt> -conf config/decoding/<save_name>.json -cuda cuda:1
+```
+Ranks the true sentence among K=50 test sentences by NLL under the EEG; modes real /
+rand / shuffle. Prefer it over TF / free-gen scores for "does the model use EEG".
+
 ### Pre-training (**needs re-running** — see 2026-07-29 in version.md)
 ```cmd
 REM verify the MAE masking path first (random tensors, no dataset, no GPU)
