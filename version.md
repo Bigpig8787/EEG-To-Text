@@ -1,22 +1,5 @@
 # Version Log — EEG-To-Text Multi-View Conformer
 
-## 2026-10-19 — retrieval BLEU / ROUGE from the ranking eval
-
-**Why.** BLEU was only available from teacher forcing (true prefix given) or free
-generation (template collapse). The ranking eval already picks a sentence per sample
-without either.
-
-**What.** `run_ranking` now takes the top-ranked candidate (a real ZuCo test sentence)
-as the prediction and scores it against the reference with the same `compute_metrics`
-as `eval_multiview.py`: `results[mode]['retrieval']` (BLEU-1..4, ROUGE, WER) and
-`preds`. `chance_retrieval` = a uniform pick among the same K candidates
-(`ranking_core.chance_pick`), the floor to read retrieval scores against — a wrong
-real sentence still shares common words with the reference. `ranking_core.pick` uses
-the same tie rule as `rank_of`, so a pick is correct exactly when rank = 1.
-`format_table` prints a second block. Older JSONs lack these keys; rerun.
-
-**Verified.** 10 stdlib tests; toy BART smoke: retrieval accuracy equals top-1 per mode.
-
 ## 2026-10-17 — sentence-ranking evaluation (neither TF nor free generation)
 
 **Why.** Teacher forcing scores BART's LM (rand_like input scores the same), and free

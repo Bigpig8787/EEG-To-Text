@@ -12,7 +12,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))))
 
-from eval.ranking_core import (candidate_indices, chance_pick, pick, rank_of,  # noqa: E402
+from eval.ranking_core import (candidate_indices, rank_of,  # noqa: E402
                                shuffle_partner, summarize, unique_keys)
 
 
@@ -65,15 +65,3 @@ def test_summarize_metrics_and_chance():
     assert r['chance_top1'] == pytest.approx(0.1)
     assert r['chance_top5'] == pytest.approx(0.5)
     assert r['ranks'] == [1, 2, 10]
-
-
-def test_pick_agrees_with_rank_and_gives_ties_to_a_distractor():
-    assert pick([1.0, 2.0, 3.0]) == 0 and rank_of(1.0, [2.0, 3.0]) == 1
-    assert pick([2.0, 1.0, 3.0]) == 1
-    assert pick([1.0, 3.0, 1.0]) == 2 and rank_of(1.0, [3.0, 1.0]) == 2
-
-
-def test_chance_pick_is_deterministic_and_in_range():
-    got = [chance_pick(50, 312, i) for i in range(200)]
-    assert got == [chance_pick(50, 312, i) for i in range(200)]
-    assert all(0 <= g < 50 for g in got) and len(set(got)) > 20

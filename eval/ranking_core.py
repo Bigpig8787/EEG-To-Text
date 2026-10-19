@@ -62,21 +62,6 @@ def rank_of(true_score: float, distractor_scores) -> int:
     return 1 + sum(1 for s in distractor_scores if s <= true_score)
 
 
-def pick(scores) -> int:
-    """Position of the candidate the model picks (lowest score) in `scores`.
-
-    `scores[0]` is the true sentence. Ties go to a distractor, the same rule as
-    `rank_of`, so `pick(scores) == 0` exactly when the rank is 1.
-    """
-    order = list(range(1, len(scores))) + [0]
-    return min(order, key=lambda j: scores[j])
-
-
-def chance_pick(k: int, seed: int, sample_idx: int) -> int:
-    """Position a uniform guesser picks among the K candidates (retrieval chance level)."""
-    return random.Random(seed * 104_729 + sample_idx).randrange(k)
-
-
 def summarize(ranks, k: int, nll_sum: float, n_tokens: int) -> dict:
     """Aggregate one mode.
 
