@@ -155,6 +155,9 @@ python eval_ranking.py -checkpoint <..._merged.pt> -conf config/decoding/<save_n
 ```
 Ranks the true sentence among K=50 test sentences by NLL under the EEG; modes real /
 rand / shuffle. Prefer it over TF / free-gen scores for "does the model use EEG".
+Since 2026-10-19 each mode also has `retrieval` (BLEU/ROUGE/WER of the top-ranked candidate
+sentence, no generation, no true prefix) and `chance_retrieval` (uniform pick among the same K);
+compare retrieval against chance, not 0.
 
 ### Pre-training (**needs re-running** — see 2026-07-29 in version.md)
 ```cmd

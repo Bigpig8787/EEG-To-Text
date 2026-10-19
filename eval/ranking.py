@@ -10,8 +10,9 @@ import torch
 from tqdm import tqdm
 from transformers.modeling_outputs import BaseModelOutput
 
-from eval.ranking_core import (MODES, candidate_indices, rank_of,
+from eval.ranking_core import (MODES, candidate_indices, chance_pick, pick, rank_of,
                                shuffle_partner, summarize, unique_keys)
+from metrics import compute_metrics
 
 
 def _sample(dataset, i, device):
@@ -65,8 +66,18 @@ def run_ranking(dataset, encode_fn, bart, tokenizer, device, modes=MODES, k=50,
     Candidates are ranked by NLL per token (length-normalised), so short
     sentences do not win just by being short.
 
+    Retrieval scores: the candidate the model ranks first is taken as its
+    prediction and scored against the true sentence with the same
+    `compute_metrics` (BLEU / ROUGE / WER) as `eval_multiview.py`. No
+    generation and no true prefix are involved. Because every prediction is a
+    real ZuCo sentence, even wrong picks share words with the reference, so
+    the scores are read against `chance_retrieval` (a uniform pick among the
+    same K candidates), not against zero.
+
     Returns:
-        {mode: summary dict from `ranking_core.summarize`}
+        {mode: summary dict from `ranking_core.summarize`, plus
+         'retrieval' (metrics of the picked sentences), 'chance_retrieval'
+         and 'preds' (picked sentence per sample)}
     """
     for m in modes:
         if m not in MODES:
@@ -84,9 +95,16 @@ def run_ranking(dataset, encode_fn, bart, tokenizer, device, modes=MODES, k=50,
     k = min(k, len(uniq))
     print(f'[ranking] samples={len(idx)} unique sentences={len(uniq)} K={k} modes={list(modes)}')
 
+    texts = tokenizer.batch_decode(torch.tensor(uniq, dtype=torch.long), skip_special_tokens=True)
+    refs = [texts[pos[key]] for key in keys]
+    cands = [candidate_indices(len(uniq), pos[keys[local]], k, seed, local)
+             for local in range(len(idx))]
+    chance = compute_metrics([texts[c[chance_pick(k, seed, local)]] for local, c in enumerate(cands)],
+                             refs)
+
     results = {}
     for mode in modes:
-        ranks, nll_sum, n_tok = [], 0.0, 0
+        ranks, picked, nll_sum, n_tok = [], [], 0.0, 0
         for local, i in enumerate(tqdm(idx, desc=f'rank[{mode}]')):
             _, views, lens = _sample(dataset, i, device)
             if mode == 'rand':
@@ -95,13 +113,17 @@ def run_ranking(dataset, encode_fn, bart, tokenizer, device, modes=MODES, k=50,
                 j = idx[shuffle_partner(keys, local, seed)]
                 _, views, lens = _sample(dataset, j, device)
             embeds, attn = encode_fn(views, lens)
-            cand = candidate_indices(len(uniq), pos[keys[local]], k, seed, local)
+            cand = cands[local]
             sums, counts = candidate_nll(bart, embeds, attn, labels_all[cand].to(device), chunk)
             score = (sums / counts.clamp(min=1)).tolist()
             ranks.append(rank_of(score[0], score[1:]))
+            picked.append(cand[pick(score)])
             nll_sum += float(sums[0])
             n_tok += int(counts[0])
+        preds = [texts[u] for u in picked]
         results[mode] = summarize(ranks, k, nll_sum, n_tok)
+        results[mode].update(retrieval=compute_metrics(preds, refs), chance_retrieval=chance,
+                             preds=preds)
     return results
 
 
@@ -113,4 +135,12 @@ def format_table(results) -> str:
     any_r = next(iter(results.values()))
     rows.append(f'{"chance":<9}{any_r["chance_top1"] * 100:7.2f}%{any_r["chance_top5"] * 100:7.2f}%'
                 f'{any_r["chance_mrr"]:8.4f}{(any_r["k"] + 1) / 2:8.2f}')
+    if 'retrieval' in any_r:
+        rows += ['', 'retrieval (top-1 candidate as the prediction; no generation, no true prefix)',
+                 f'{"mode":<9}{"BLEU-1":>8}{"BLEU-4":>8}{"ROUGE-1":>9}{"WER":>8}']
+        lines = [(m, r['retrieval']) for m, r in results.items()]
+        lines.append(('chance', any_r['chance_retrieval']))
+        for mode, m in lines:
+            rows.append(f'{mode:<9}{m["bleu-1"] * 100:7.2f}%{m["bleu-4"] * 100:7.2f}%'
+                        f'{m["rouge1_fmeasure"]:8.2f}%{m["wer"]:8.4f}')
     return '\n'.join(rows)
