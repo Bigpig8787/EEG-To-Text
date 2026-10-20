@@ -142,6 +142,8 @@ Every training run shows train loss dropping but dev loss exploding. Summary of 
 ```bash
 cd /home/jovyan/EEG-BCI/EEG-To-Text
 nohup bash scripts/run_paper_best_200hz.sh cuda:1 > logs/ann_paper_best_200hz.out 2>&1 &
+# local 2 layers (pretrain + finetune), saved under *_local2, 4-layer run untouched:
+nohup bash scripts/run_paper_best_200hz.sh cuda:1 2 > logs/ann_paper_best_200hz_local2.out 2>&1 &
 ```
 pretrain -> STEP 1 -> STEP 2 LoRA -> 4 eval combos; finished stages are skipped.
 Data flags: `--dataset_root`, `--pickle_suffix=-dataset-200hz.pickle` (the `=` is required,

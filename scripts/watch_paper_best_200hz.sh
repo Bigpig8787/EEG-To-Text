@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
 # run_paper_best_200hz.sh 的進度快照（印一次就結束）。固定畫面每 120 秒更新：
 #   watch -n 120 bash scripts/watch_paper_best_200hz.sh
-# 參數 1 = nohup 的輸出檔（預設 logs/ann_paper_best_200hz.out）。
+# 參數 1 = nohup 的輸出檔（預設 logs/ann_paper_best_200hz.out）；參數 2 = local 層數（預設 4）：
+#   watch -n 120 bash scripts/watch_paper_best_200hz.sh logs/ann_paper_best_200hz_local2.out 2
 
 cd "$(dirname "$0")/.." || exit 1
 OUT=${1:-logs/ann_paper_best_200hz.out}
 PRE=checkpoints/pretrain_paper_best_200hz
 FT=checkpoints/paper_best_200hz
 TAG=_paperbest200hz
+LOCAL_LAYERS=${2:-4}
+if [[ $LOCAL_LAYERS != 4 ]]; then
+    PRE+=_local$LOCAL_LAYERS; FT+=_local$LOCAL_LAYERS; TAG+=_local$LOCAL_LAYERS
+fi
 PRE_EPOCHS=50
 
 echo "== ANN paper-best 200Hz   $(date '+%F %T') =="
@@ -27,7 +32,10 @@ fi
 
 # ── 階段 ──
 has() { compgen -G "$1" >/dev/null && echo "✅" || echo "⬜"; }
-n_eval=$(compgen -G "results/*${TAG}*_metrics.json" | wc -l)
+n_eval=0
+for t in "" _tf _noise _tf_noise; do
+    compgen -G "results/*multiview${TAG}${t}_metrics.json" >/dev/null && n_eval=$((n_eval + 1))
+done
 echo "階段   pretrain $(has "$PRE/encoder_best.pt")  STEP1 $(has "$FT/last/*${TAG}_s1.pt")  STEP2 $(has "$FT/best/*${TAG}_merged.pt")  eval ${n_eval}/4"
 
 # 只看檔尾，tqdm 進度條會讓檔案很大

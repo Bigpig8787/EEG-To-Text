@@ -1,5 +1,16 @@
 # Version Log — EEG-To-Text Multi-View Conformer
 
+## 2026-10-20 — local transformer depth as a script argument
+
+`scripts/run_paper_best_200hz.sh <cuda> [LOCAL_LAYERS=4]` sets both the MAE pretrain
+(`--n_transformer_layers`) and the finetune (`--n_encoder_layers`) depth. Any value other
+than 4 appends `_local<N>` to the save suffix and both checkpoint directories, so the
+finished 4-layer run is never touched. `watch_paper_best_200hz.sh` takes the same second
+argument; its eval count now matches the four exact result names instead of a glob that
+would also have counted the `_local<N>` files. Purpose: an ANN with 2 local layers to
+match the SNN 1T1S grid (the SNN side gets a 4-layer cell in
+`Spiking-EEG2TEXT/configs/ablation_paper_local4_v1.json`).
+
 ## 2026-10-17 — sentence-ranking evaluation (neither TF nor free generation)
 
 **Why.** Teacher forcing scores BART's LM (rand_like input scores the same), and free
